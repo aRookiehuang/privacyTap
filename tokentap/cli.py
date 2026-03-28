@@ -227,6 +227,12 @@ def _run_tool(provider: str, command: str, port: int, args: tuple) -> None:
     env = os.environ.copy()
     proxy_url = f"http://127.0.0.1:{port}"
 
+    # Append provider-specific proxy path (e.g., /minimax/v1 for
+    # OpenAI-compatible providers that need path-prefix routing)
+    proxy_path = provider_config.get("proxy_path", "")
+    if proxy_path:
+        proxy_url += proxy_path
+
     # Set all environment variables for this provider
     for env_var in provider_config["env_vars"]:
         env[env_var] = proxy_url

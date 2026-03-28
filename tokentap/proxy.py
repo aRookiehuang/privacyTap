@@ -34,15 +34,29 @@ class ProxyServer:
         self._runner = None
         self._site = None
 
-    def _detect_provider(self, path: str) -> str | None:
-        """Detect the provider from the request path."""
+    def _detect_provider(self, path: str) -> tuple[str | None, str]:
+        """Detect the provider from the request path.
+
+        Returns:
+            Tuple of (provider_name, cleaned_path). For providers with a
+            path_prefix (e.g. MiniMax), the prefix is stripped from the
+            returned path so the upstream URL is constructed correctly.
+        """
+        # Check for explicit provider path prefixes first (e.g., /minimax/v1/...)
+        for name, config in PROVIDERS.items():
+            prefix = config.get("path_prefix")
+            if prefix and path.startswith(f"/{prefix}/"):
+                cleaned = path[len(f"/{prefix}"):]
+                return name, cleaned
+
+        # Fall back to endpoint-based detection
         if "/v1/messages" in path:
-            return "anthropic"
+            return "anthropic", path
         elif "/v1/chat/completions" in path or "/v1/responses" in path:
-            return "openai"
+            return "openai", path
         elif "generateContent" in path or "streamGenerateContent" in path:
-            return "gemini"
-        return None
+            return "gemini", path
+        return None, path
 
     async def handle_request(self, request: web.Request) -> web.Response:
         """Handle incoming request and forward to upstream."""
@@ -50,16 +64,16 @@ class ProxyServer:
         if request.query_string:
             path += "?" + request.query_string
 
-        # Detect provider from path
-        provider = self._detect_provider(path)
+        # Detect provider from path (may strip prefix for compat providers)
+        provider, cleaned_path = self._detect_provider(path)
         if not provider:
             return web.Response(
                 status=400,
-                text=f"Unknown API path: {path}. Supported: Anthropic, OpenAI, Gemini",
+                text=f"Unknown API path: {path}. Supported: Anthropic, OpenAI, Gemini, MiniMax",
             )
 
         upstream_base = PROVIDERS[provider]["base_url"]
-        upstream_url = upstream_base + path
+        upstream_url = upstream_base + cleaned_path
 
         # Read request body
         body = await request.read()
@@ -113,7 +127,7 @@ class ProxyServer:
         parsed = None
         if provider == "anthropic":
             parsed = parse_anthropic_request(body_dict)
-        elif provider == "openai":
+        elif provider in ("openai", "minimax"):
             parsed = self._parse_openai_request(body_dict)
         elif provider == "gemini":
             parsed = self._parse_gemini_request(body_dict)

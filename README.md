@@ -10,6 +10,7 @@
     <img src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" alt="Claude Code">
     <img src="https://img.shields.io/badge/Gemini_CLI-supported-blue.svg" alt="Gemini">
     <img src="https://img.shields.io/badge/Codex-supported-green.svg" alt="Codex">
+    <img src="https://img.shields.io/badge/MiniMax-supported-orange.svg" alt="MiniMax">
   </p>
   <p align="center">
     <a href="#installation">Installation</a> •
@@ -86,6 +87,9 @@ tokentap gemini
 
 # For OpenAI Codex
 tokentap codex
+
+# For MiniMax-powered tools
+tokentap run --provider minimax python my_app.py
 ```
 
 That's it! Watch the dashboard update in real-time as you work.
@@ -122,6 +126,8 @@ Session complete. Total: 84,231 tokens across 12 requests.
 | `tokentap gemini` | Run Gemini CLI with proxy configured |
 | `tokentap codex` | Run OpenAI Codex CLI with proxy configured |
 | `tokentap run --provider <name> <cmd>` | Run any command with proxy configured |
+
+Supported providers for `--provider`: `anthropic`, `openai`, `gemini`, `minimax`
 
 ### Options
 
@@ -168,6 +174,16 @@ Options:
                       └───────────────────┘
 ```
 
+For OpenAI-compatible providers like [MiniMax](https://www.minimaxi.com), tokentap uses
+path-prefix routing so requests are forwarded to the correct upstream API:
+
+```
+tokentap run --provider minimax python my_app.py
+  → sets OPENAI_BASE_URL=http://localhost:8080/minimax/v1
+  → requests arrive at /minimax/v1/chat/completions
+  → proxy strips prefix, forwards to https://api.minimax.io/v1/chat/completions
+```
+
 ## Supported Providers
 
 | Provider | Command | Status |
@@ -175,6 +191,7 @@ Options:
 | Anthropic (Claude Code) | `tokentap claude` | Supported |
 | Google (Gemini CLI) | `tokentap gemini` | Blocked by upstream issue |
 | OpenAI (Codex) | `tokentap codex` | Supported |
+| MiniMax | `tokentap run --provider minimax <cmd>` | Supported |
 
 ## Known Issues
 
