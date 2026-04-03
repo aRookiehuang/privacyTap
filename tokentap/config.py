@@ -23,6 +23,13 @@ PROVIDERS = {
             "GEMINI_BASEURL",
         ],
     },
+    "minimax": {
+        "host": "api.minimax.io",
+        "base_url": "https://api.minimax.io",
+        "env_vars": ["OPENAI_BASE_URL"],
+        "proxy_path": "/minimax/v1",
+        "path_prefix": "minimax",
+    },
 }
 
 # Legacy compatibility
