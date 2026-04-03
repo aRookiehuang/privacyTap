@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "build", "twine"]
+dev = ["pytest", "pytest-asyncio", "build", "twine"]
 
 [project.urls]
 Homepage = "https://tokentap.ai"
