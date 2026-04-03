@@ -50,9 +50,11 @@ class ProxyServer:
                 return name, cleaned
 
         # Fall back to endpoint-based detection
-        if "/v1/messages" in path:
+        # Match with or without /v1 prefix — the OpenAI SDK strips /v1
+        # when OPENAI_BASE_URL doesn't include it.
+        if "/messages" in path:
             return "anthropic", path
-        elif "/v1/chat/completions" in path or "/v1/responses" in path:
+        elif "/chat/completions" in path or "/responses" in path:
             return "openai", path
         elif "generateContent" in path or "streamGenerateContent" in path:
             return "gemini", path
