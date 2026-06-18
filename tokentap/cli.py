@@ -14,7 +14,9 @@ from rich.console import Console
 
 from tokentap.config import DEFAULT_PROXY_PORT, DEFAULT_TOKEN_LIMIT, PROVIDERS, PROMPTS_DIR, TOKENTAP_DIR
 from tokentap.dashboard import TokenTapDashboard
+from tokentap.privacy_proxy import PrivacyProxyServer
 from tokentap.proxy import ProxyServer
+from tokentap.safe_archive import save_safe_event
 
 console = Console()
 
@@ -161,6 +163,90 @@ def start(port: int, limit: int):
         loop.call_soon_threadsafe(loop.stop)
         console.print()
         console.print(f"[cyan]Session complete. Total: {dashboard.total_tokens:,} tokens across {len(dashboard.requests)} requests.[/cyan]")
+
+
+@main.command("privacy-start")
+@click.option(
+    "--port", "-p", default=8080, show_default=True, type=int
+)
+@click.option(
+    "--upstream-base-url",
+    envvar="PRIVACYTAP_UPSTREAM_BASE_URL",
+    required=True,
+    help=(
+        "OpenAI-compatible upstream base URL without "
+        "/v1/chat/completions"
+    ),
+)
+@click.option(
+    "--archive-dir",
+    default="./privacytap-traces",
+    show_default=True,
+    type=click.Path(path_type=Path),
+)
+@click.option(
+    "--langfuse/--no-langfuse", default=False, show_default=True
+)
+def privacy_start(
+    port: int,
+    upstream_base_url: str,
+    archive_dir: Path,
+    langfuse: bool,
+) -> None:
+    """Start the full-chain reversible privacy proxy."""
+    exporter = None
+    if langfuse:
+        try:
+            from tokentap.privacy.langfuse_exporter import (
+                LangfuseSafeExporter,
+            )
+
+            exporter = LangfuseSafeExporter()
+        except (ImportError, ValueError) as exc:
+            raise click.ClickException(
+                "Langfuse is unavailable. Install .[langfuse] "
+                "and configure credentials."
+            ) from exc
+
+    def on_safe_event(event: dict) -> None:
+        save_safe_event(event, archive_dir)
+        if exporter is not None:
+            try:
+                exporter.export(event)
+            except Exception:
+                console.print(
+                    "[yellow]Langfuse export failed; "
+                    "request result is unaffected.[/yellow]"
+                )
+
+    proxy = PrivacyProxyServer(
+        port=port,
+        upstream_base_url=upstream_base_url,
+        on_safe_event=on_safe_event,
+    )
+
+    async def serve() -> None:
+        await proxy.start()
+        try:
+            console.print(
+                "[green]PrivacyTap listening on "
+                f"http://127.0.0.1:{proxy.bound_port}[/green]"
+            )
+            console.print(
+                f"[green]Safe traces: {archive_dir.resolve()}[/green]"
+            )
+            console.print(
+                "[yellow]Only non-streaming POST "
+                "/v1/chat/completions is supported.[/yellow]"
+            )
+            await asyncio.Event().wait()
+        finally:
+            await proxy.stop()
+
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        console.print("\n[cyan]PrivacyTap stopped.[/cyan]")
 
 
 @main.command(context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
