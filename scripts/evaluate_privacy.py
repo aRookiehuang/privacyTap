@@ -4,6 +4,8 @@ import time
 from pathlib import Path
 
 from tokentap.privacy.detectors import detect_sensitive
+from tokentap.privacy.models import SensitiveCredentialError
+from tokentap.privacy.transformer import sanitize_payload
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +34,8 @@ def percentile(values: list[float], ratio: float) -> float:
 def main() -> int:
     cases = json.loads(DATASET.read_text(encoding="utf-8"))
     tp = fp = fn = 0
-    latencies_ms: list[float] = []
+    detection_latencies_ms: list[float] = []
+    transform_latencies_ms: list[float] = []
 
     for case in cases:
         expected = {
@@ -51,20 +54,49 @@ def main() -> int:
         for _ in range(100):
             started = time.perf_counter()
             detect_sensitive(case["text"])
-            latencies_ms.append(
+            detection_latencies_ms.append(
+                (time.perf_counter() - started) * 1000
+            )
+            started = time.perf_counter()
+            try:
+                sanitize_payload(
+                    {
+                        "model": "benchmark",
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": case["text"],
+                            }
+                        ],
+                    }
+                )
+            except SensitiveCredentialError:
+                pass
+            transform_latencies_ms.append(
                 (time.perf_counter() - started) * 1000
             )
 
     precision, recall, f1 = metrics(tp, fp, fn)
-    p50 = percentile(latencies_ms, 0.50)
-    p95 = percentile(latencies_ms, 0.95)
+    detection_p50 = percentile(detection_latencies_ms, 0.50)
+    detection_p95 = percentile(detection_latencies_ms, 0.95)
+    transform_p50 = percentile(transform_latencies_ms, 0.50)
+    transform_p95 = percentile(transform_latencies_ms, 0.95)
     print(f"TP={tp} FP={fp} FN={fn}")
     print(
         f"Precision={precision:.4f} "
         f"Recall={recall:.4f} F1={f1:.4f}"
     )
-    print(f"Latency P50={p50:.4f}ms P95={p95:.4f}ms")
-    return 0 if min(precision, recall, f1) >= 0.95 else 1
+    print(
+        f"Detection P50={detection_p50:.4f}ms "
+        f"P95={detection_p95:.4f}ms"
+    )
+    print(
+        f"Transform P50={transform_p50:.4f}ms "
+        f"P95={transform_p95:.4f}ms"
+    )
+    meets_quality = min(precision, recall, f1) >= 0.95
+    meets_latency = transform_p95 < 20.0
+    return 0 if meets_quality and meets_latency else 1
 
 
 if __name__ == "__main__":
