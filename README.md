@@ -1,233 +1,173 @@
-<p align="center">
-  <h1 align="center">Tokentap (formerly Sherlock)</h1>
-  <p align="center">
-    <strong>Token Tracker for LLM CLI Tools</strong>
-  </p>
-  <p align="center">
-    <img src="https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white" alt="Python">
-    <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
-    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg" alt="Platform">
-    <img src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" alt="Claude Code">
-    <img src="https://img.shields.io/badge/Gemini_CLI-supported-blue.svg" alt="Gemini">
-    <img src="https://img.shields.io/badge/Codex-supported-green.svg" alt="Codex">
-    <img src="https://img.shields.io/badge/MiniMax-supported-orange.svg" alt="MiniMax">
-  </p>
-  <p align="center">
-    <a href="#installation">Installation</a> •
-    <a href="#quick-start">Quick Start</a> •
-    <a href="#features">Features</a> •
-    <a href="#commands">Commands</a> •
-    <a href="#contributing">Contributing</a>
-  </p>
-</p>
+# PrivacyTap
 
----
+面向大模型调用的全链路可逆匿名化隐私代理。
 
-tokentap tracks token usage for LLM CLI tools with a live terminal dashboard. See exactly how many tokens you're using in real-time.
+> **问题：** Prompt 中的手机号、身份证、邮箱、银行卡、学号和 API Key，可能同时泄露给第三方模型、TokenTap 本地日志和 Langfuse Trace。
 
-## Why tokentap?
+PrivacyTap 基于 [TokenTap](https://github.com/jmuncor/tokentap) 的 OpenAI-compatible 代理能力，在请求离开本机前匿名化五类 PII，对 API Key 直接阻断；模型响应先以脱敏状态进入日志和 Langfuse，再在本地恢复后返回用户。
 
-- **Track Token Usage**: See exactly how many tokens each request consumes
-- **Monitor Context Windows**: Visual fuel gauge shows cumulative usage against your limit
-- **Debug Prompts**: Automatically saves every prompt as markdown and JSON for review
-- **Zero Configuration**: No certificates, no setup - just install and go
+## 数据流
 
-## Installation
-
-```bash
-pip install tokentap
+```mermaid
+flowchart LR
+    A["OpenAI-compatible 客户端"] --> B["PrivacyTap"]
+    B --> C{"检测敏感信息"}
+    C -->|"API Key"| X["HTTP 422 阻断"]
+    C -->|"五类 PII"| D["请求级内存 Vault"]
+    D --> E["语义占位符替换"]
+    E --> F["第三方模型"]
+    E --> G["安全本地日志"]
+    E --> H["安全 Langfuse Trace"]
+    F --> I["脱敏响应"]
+    I --> G
+    I --> H
+    I --> J["本地恢复占位符"]
+    J --> A
 ```
 
-Or install from source:
+## 支持范围
 
-```bash
-git clone https://github.com/jmuncor/tokentap.git
-cd tokentap
-pip install -e .
+| 类型 | 示例策略 |
+|---|---|
+| 手机号 | `13812345678` → `[PHONE_1]` |
+| 中国居民身份证 | 校验位通过后 → `[CN_ID_1]` |
+| 邮箱 | `alice@example.com` → `[EMAIL_1]` |
+| 银行卡 | Luhn 通过后 → `[BANK_CARD_1]` |
+| 学号 | 带“学号/Student ID”上下文 → `[STUDENT_ID_1]` |
+| API Key / Bearer Token | 直接返回 HTTP 422，不请求上游 |
+
+MVP 仅支持非流式 `POST /v1/chat/completions`。流式请求会明确返回 HTTP 400。
+
+## 安装
+
+```powershell
+git clone <本仓库地址> privacytap
+Set-Location privacytap
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
-### Requirements
+如需 Langfuse：
 
-- Python 3.10+
-
-## Quick Start
-
-### Terminal 1: Start the Dashboard
-
-```bash
-tokentap start
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,langfuse]"
 ```
 
-You'll be prompted to choose where to save captured prompts, then the dashboard appears:
+## 无模型 Key 离线演示
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  TOKENTAP - LLM Traffic Inspector                           │
-├─────────────────────────────────────────────────────────────┤
-│  Context Usage  ████████████░░░░░░░░░░░░░░░░  42%           │
-│                 (84,231 / 200,000 tokens)                   │
-├─────────────────────────────────────────────────────────────┤
-│  Time     Provider    Model                      Tokens     │
-│  14:23:01 Anthropic   claude-sonnet-4-20250514   12,847     │
-│  14:23:45 Anthropic   claude-sonnet-4-20250514   8,234      │
-│  14:24:12 Anthropic   claude-sonnet-4-20250514   15,102     │
-├─────────────────────────────────────────────────────────────┤
-│  Last Prompt: "Can you help me refactor this function..."   │
-└─────────────────────────────────────────────────────────────┘
+打开三个 PowerShell 终端。
+
+### Terminal 1：启动 Mock 模型
+
+```powershell
+.\.venv\Scripts\python.exe examples\mock_upstream.py
 ```
 
-### Terminal 2: Run Your LLM Tool
+### Terminal 2：启动 PrivacyTap
 
-```bash
-# For Claude Code
-tokentap claude
-
-# For Gemini CLI (see known issues)
-tokentap gemini
-
-# For OpenAI Codex
-tokentap codex
-
-# For MiniMax-powered tools
-tokentap run --provider minimax python my_app.py
+```powershell
+.\.venv\Scripts\tokentap.exe privacy-start `
+  --port 8080 `
+  --upstream-base-url http://127.0.0.1:18080 `
+  --archive-dir .\privacytap-traces
 ```
 
-That's it! Watch the dashboard update in real-time as you work.
+### Terminal 3：发送三组请求
 
-## Features
-
-### Live Terminal Dashboard
-
-Real-time token tracking with color-coded fuel gauge:
-- Green: < 50% of limit
-- Yellow: 50-80% of limit
-- Red: > 80% of limit
-
-### Prompt Archive
-
-Every intercepted request is saved to your chosen directory:
-- **Markdown** - Human-readable format with metadata
-- **JSON** - Raw API request body for debugging
-
-### Session Summary
-
-When you exit, see your total usage:
-
-```
-Session complete. Total: 84,231 tokens across 12 requests.
+```powershell
+.\.venv\Scripts\python.exe examples\demo_client.py
 ```
 
-## Commands
+若 `8080` 已被占用，可同时修改代理端口和客户端环境变量：
 
-| Command | Description |
-|---------|-------------|
-| `tokentap start` | Start the proxy and dashboard |
-| `tokentap claude` | Run Claude Code with proxy configured |
-| `tokentap gemini` | Run Gemini CLI with proxy configured |
-| `tokentap codex` | Run OpenAI Codex CLI with proxy configured |
-| `tokentap run --provider <name> <cmd>` | Run any command with proxy configured |
+```powershell
+# Terminal 2
+.\.venv\Scripts\tokentap.exe privacy-start `
+  --port 18081 `
+  --upstream-base-url http://127.0.0.1:18080
 
-Supported providers for `--provider`: `anthropic`, `openai`, `gemini`, `minimax`
-
-### Options
-
-```bash
-tokentap start [OPTIONS]
-
-Options:
-  -p, --port NUM    Proxy port (default: 8080)
-  -l, --limit NUM   Token limit for fuel gauge (default: 200000)
+# Terminal 3
+$env:PRIVACYTAP_PROXY_URL="http://127.0.0.1:18081/v1/chat/completions"
+.\.venv\Scripts\python.exe examples\demo_client.py
 ```
 
-```bash
-tokentap claude [OPTIONS] [ARGS]...
+演示包括：
 
-Options:
-  -p, --port NUM    Proxy port (default: 8080)
+1. 五类 PII 匿名化后发送，响应恢复；
+2. 无敏感数据的普通请求；
+3. API Key 被 422 阻断。
+
+## 三端看到的数据
+
+| 位置 | 看到的内容 |
+|---|---|
+| 第三方模型 | `[PHONE_1]`、`[EMAIL_1]` 等占位符 |
+| TokenTap / Langfuse | 脱敏请求与脱敏上游响应 |
+| 最终用户 | 通过请求级 Vault 恢复后的响应 |
+
+Vault 仅存在于单次请求内存中，不写磁盘、不上传，也不跨请求共享。
+
+## 连接真实 OpenAI-compatible 服务
+
+```powershell
+$env:PRIVACYTAP_UPSTREAM_BASE_URL="https://api.example.com"
+.\.venv\Scripts\tokentap.exe privacy-start
 ```
 
-## How It Works
+客户端将 Base URL 指向：
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Terminal 1: tokentap start                                     │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │  HTTP Proxy (localhost:8080)                                ││
-│  │  + Dashboard                                                ││
-│  │  + Prompt Archive                                           ││
-│  └─────────────────────────────────────────────────────────────┘│
-└───────────────────────────────┬─────────────────────────────────┘
-                                │ HTTP
-                                │
-┌───────────────────────────────┴─────────────────────────────────┐
-│  Terminal 2: tokentap claude                                    │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │  Sets ANTHROPIC_BASE_URL=http://localhost:8080              ││
-│  │  Runs: claude                                               ││
-│  └─────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                │ HTTPS
-                                ▼
-                      ┌───────────────────┐
-                      │ api.anthropic.com │
-                      └───────────────────┘
+```text
+http://127.0.0.1:8080/v1
 ```
 
-For OpenAI-compatible providers like [MiniMax](https://www.minimaxi.com), tokentap uses
-path-prefix routing so requests are forwarded to the correct upstream API:
+合法的传输层 `Authorization` Header 会被转发给上游，但不会进入安全事件或日志。若凭证出现在 Prompt/JSON 内容中，则请求被阻断。
 
-```
-tokentap run --provider minimax python my_app.py
-  → sets OPENAI_BASE_URL=http://localhost:8080/minimax/v1
-  → requests arrive at /minimax/v1/chat/completions
-  → proxy strips prefix, forwards to https://api.minimax.io/v1/chat/completions
-```
+## Langfuse
 
-## Supported Providers
+```powershell
+$env:LANGFUSE_PUBLIC_KEY="pk-lf-..."
+$env:LANGFUSE_SECRET_KEY="sk-lf-..."
+$env:LANGFUSE_BASE_URL="http://127.0.0.1:3000"
 
-| Provider | Command | Status |
-|----------|---------|--------|
-| Anthropic (Claude Code) | `tokentap claude` | Supported |
-| Google (Gemini CLI) | `tokentap gemini` | Blocked by upstream issue |
-| OpenAI (Codex) | `tokentap codex` | Supported |
-| MiniMax | `tokentap run --provider minimax <cmd>` | Supported |
-
-## Known Issues
-
-### Gemini CLI
-
-Gemini CLI currently has a [known issue](https://github.com/google-gemini/gemini-cli/issues/15430) where it ignores custom base URLs when using OAuth authentication. tokentap's Gemini support will work automatically once the Gemini CLI team fixes this issue.
-
-## Contributing
-
-Contributions are welcome! Here's how you can help:
-
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
-
-### Development Setup
-
-```bash
-git clone https://github.com/jmuncor/tokentap.git
-cd tokentap
-python -m venv venv
-source venv/bin/activate
-pip install -e .
+.\.venv\Scripts\tokentap.exe privacy-start `
+  --upstream-base-url http://127.0.0.1:18080 `
+  --langfuse
 ```
 
-## License
+Langfuse 不可用时，本地模型请求仍可完成；导出失败不会破坏主链路。
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## 测试与评测
 
----
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
 
-<p align="center">
-  <em>See what's really being sent to the LLM. Track. Learn. Optimize.</em>
-</p>
-<p align="center">
-  <a href="https://tokentap.ai">tokentap.ai</a>
-</p>
+.\.venv\Scripts\python.exe -m pytest `
+  --cov=tokentap.privacy `
+  --cov=tokentap.privacy_proxy `
+  --cov=tokentap.safe_archive `
+  --cov-report=term-missing `
+  --cov-fail-under=90
+
+.\.venv\Scripts\python.exe scripts\evaluate_privacy.py
+```
+
+评测脚本输出 Precision、Recall、F1、P50 和 P95 检测耗时。实验数据位于 `tests/fixtures/privacy_cases.json`。
+
+## 项目边界
+
+PrivacyTap 解决的是结构化敏感信息离开本机和进入观测系统的问题。它不是法律合规认证产品，也不防御已被攻陷的本机、内存转储、绕过代理的直接调用或图片/音频中的隐私。
+
+## 文档
+
+- [课程项目档案](docs/project-brief.md)
+- [实验与指标](docs/experiment.md)
+- [威胁模型](docs/threat-model.md)
+
+## 开源基础
+
+- [TokenTap](https://github.com/jmuncor/tokentap)：代理、Token 统计和 CLI 基础，MIT License。
+- [Langfuse](https://github.com/langfuse/langfuse)：可选 LLM Trace 展示。
+- [Microsoft Presidio](https://github.com/microsoft/presidio)：通用 PII 检测参考。
+- [LLM Guard](https://github.com/protectai/llm-guard)：LLM 输入匿名化参考。
+
+本项目保留上游 TokenTap 的 MIT License。

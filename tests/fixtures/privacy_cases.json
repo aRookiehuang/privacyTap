@@ -1,0 +1,40 @@
+[
+  {"text": "联系电话 13812345678", "expected": [{"type": "PHONE", "value": "13812345678"}]},
+  {"text": "备用电话：15987654321", "expected": [{"type": "PHONE", "value": "15987654321"}]},
+  {"text": "手机号18600001111", "expected": [{"type": "PHONE", "value": "18600001111"}]},
+  {"text": "Call 17712345678 today", "expected": [{"type": "PHONE", "value": "17712345678"}]},
+
+  {"text": "身份证 11010519491231002X", "expected": [{"type": "CN_ID", "value": "11010519491231002X"}]},
+  {"text": "证件号110105199001010010", "expected": [{"type": "CN_ID", "value": "110105199001010010"}]},
+  {"text": "CN ID: 31010119880506234X", "expected": [{"type": "CN_ID", "value": "31010119880506234X"}]},
+  {"text": "身份证号：440106200112123454", "expected": [{"type": "CN_ID", "value": "440106200112123454"}]},
+
+  {"text": "邮箱 alice@example.com", "expected": [{"type": "EMAIL", "value": "alice@example.com"}]},
+  {"text": "邮箱bob.smith+course@school.edu.cn", "expected": [{"type": "EMAIL", "value": "bob.smith+course@school.edu.cn"}]},
+  {"text": "Send to user_01@test.org", "expected": [{"type": "EMAIL", "value": "user_01@test.org"}]},
+  {"text": "备用地址：dev-team@sub.example.net", "expected": [{"type": "EMAIL", "value": "dev-team@sub.example.net"}]},
+
+  {"text": "银行卡 4532-0151-1283-0366", "expected": [{"type": "BANK_CARD", "value": "4532-0151-1283-0366"}]},
+  {"text": "卡号 4111111111111111", "expected": [{"type": "BANK_CARD", "value": "4111111111111111"}]},
+  {"text": "付款卡 5555 5555 5555 4444", "expected": [{"type": "BANK_CARD", "value": "5555 5555 5555 4444"}]},
+  {"text": "Card 6011111111111117", "expected": [{"type": "BANK_CARD", "value": "6011111111111117"}]},
+
+  {"text": "学号：2023123456", "expected": [{"type": "STUDENT_ID", "value": "2023123456"}]},
+  {"text": "学号S20240001", "expected": [{"type": "STUDENT_ID", "value": "S20240001"}]},
+  {"text": "Student ID: A20250002", "expected": [{"type": "STUDENT_ID", "value": "A20250002"}]},
+  {"text": "student no. 202612345678", "expected": [{"type": "STUDENT_ID", "value": "202612345678"}]},
+
+  {"text": "密钥 sk-proj-abcdefghijklmnopqrstuv", "expected": [{"type": "API_KEY", "value": "sk-proj-abcdefghijklmnopqrstuv"}]},
+  {"text": "Google key AIzaSyDUMMY012345678901234567890", "expected": [{"type": "API_KEY", "value": "AIzaSyDUMMY012345678901234567890"}]},
+  {"text": "GitHub token ghp_abcdefghijklmnopqrstuvwxyz123456", "expected": [{"type": "API_KEY", "value": "ghp_abcdefghijklmnopqrstuvwxyz123456"}]},
+  {"text": "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456", "expected": [{"type": "API_KEY", "value": "Bearer abcdefghijklmnopqrstuvwxyz123456"}]},
+
+  {"text": "普通数字 12345678901", "expected": []},
+  {"text": "错误身份证 110105194912310021", "expected": []},
+  {"text": "无效银行卡 4532015112830367", "expected": []},
+  {"text": "普通编号 2023123456", "expected": []},
+  {"text": "短 token abcdefghijklmnop", "expected": []},
+  {"text": "错误邮箱 alice@example", "expected": []},
+  {"text": "版本日期 2026.06.18", "expected": []},
+  {"text": "嵌入数字 9138123456780 不应命中手机号", "expected": []}
+]

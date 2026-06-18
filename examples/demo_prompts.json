@@ -1,0 +1,14 @@
+[
+  {
+    "name": "full_redaction",
+    "prompt": "请联系手机号 13812345678，身份证 11010519491231002X，邮箱 alice@example.com，银行卡 4532015112830366，学号：2023123456。"
+  },
+  {
+    "name": "no_sensitive_data",
+    "prompt": "请解释什么是消息中间件。"
+  },
+  {
+    "name": "credential_block",
+    "prompt": "请检查 API Key：sk-proj-abcdefghijklmnopqrstuv"
+  }
+]
