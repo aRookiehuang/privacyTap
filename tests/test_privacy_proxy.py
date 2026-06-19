@@ -3,7 +3,7 @@ import json
 import pytest
 from aiohttp import ClientSession, web
 
-from tokentap.privacy_proxy import PrivacyProxyServer
+from privacytap.proxy import PrivacyProxyServer
 
 
 async def start_upstream(port, handler):

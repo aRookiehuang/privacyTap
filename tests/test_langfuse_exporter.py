@@ -1,13 +1,13 @@
 from unittest.mock import MagicMock
 
-from tokentap.privacy.langfuse_exporter import LangfuseSafeExporter
+from integrations.langfuse_exporter import LangfuseExporter
 
 
 def test_exporter_sends_only_safe_event():
     client = MagicMock()
     observation = MagicMock()
     client.start_observation.return_value = observation
-    exporter = LangfuseSafeExporter(client=client)
+    exporter = LangfuseExporter(client=client)
     event = {
         "timestamp": "2026-06-18T12:00:00",
         "provider": "openai-compatible",

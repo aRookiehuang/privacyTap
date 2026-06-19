@@ -4,7 +4,7 @@ import json
 import pytest
 from aiohttp import ClientSession, web
 
-from tokentap.privacy_proxy import PrivacyProxyServer
+from privacytap.proxy import PrivacyProxyServer
 
 
 def assert_secrets_absent(value, secrets: list[str]) -> None:

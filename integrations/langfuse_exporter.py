@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 
-class LangfuseSafeExporter:
+class LangfuseExporter:
     """Export only the already-sanitized privacy event to Langfuse."""
 
     def __init__(self, client: Any | None = None) -> None:

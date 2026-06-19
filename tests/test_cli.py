@@ -1,77 +1,50 @@
-"""Unit tests for tokentap CLI — MiniMax _run_tool and run command."""
-
-import os
-from unittest.mock import MagicMock, patch
-
-import pytest
 from click.testing import CliRunner
 
-from tokentap.cli import main, _run_tool
-from tokentap.config import DEFAULT_PROXY_PORT, PROVIDERS
+from privacytap.cli import main
 
 
-class TestRunTool:
-    """Tests for _run_tool with MiniMax provider."""
-
-    @patch("tokentap.cli.subprocess.run")
-    def test_minimax_sets_openai_base_url_with_prefix(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0)
-        with pytest.raises(SystemExit, match="0"):
-            _run_tool("minimax", "python", DEFAULT_PROXY_PORT, ("app.py",))
-        call_env = mock_run.call_args[1]["env"]
-        expected = f"http://127.0.0.1:{DEFAULT_PROXY_PORT}/minimax/v1"
-        assert call_env["OPENAI_BASE_URL"] == expected
-
-    @patch("tokentap.cli.subprocess.run")
-    def test_minimax_runs_command(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0)
-        with pytest.raises(SystemExit, match="0"):
-            _run_tool("minimax", "python", 9999, ("my_app.py",))
-        cmd = mock_run.call_args[0][0]
-        assert cmd == ["python", "my_app.py"]
-
-    @patch("tokentap.cli.subprocess.run")
-    def test_anthropic_no_proxy_path(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0)
-        with pytest.raises(SystemExit, match="0"):
-            _run_tool("anthropic", "claude", DEFAULT_PROXY_PORT, ())
-        call_env = mock_run.call_args[1]["env"]
-        expected = f"http://127.0.0.1:{DEFAULT_PROXY_PORT}"
-        assert call_env["ANTHROPIC_BASE_URL"] == expected
-
-    @patch("tokentap.cli.subprocess.run")
-    def test_openai_no_proxy_path(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0)
-        with pytest.raises(SystemExit, match="0"):
-            _run_tool("openai", "codex", DEFAULT_PROXY_PORT, ())
-        call_env = mock_run.call_args[1]["env"]
-        expected = f"http://127.0.0.1:{DEFAULT_PROXY_PORT}"
-        assert call_env["OPENAI_BASE_URL"] == expected
-
-    @patch("tokentap.cli.subprocess.run")
-    def test_minimax_custom_port(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0)
-        with pytest.raises(SystemExit, match="0"):
-            _run_tool("minimax", "python", 9090, ("app.py",))
-        call_env = mock_run.call_args[1]["env"]
-        assert call_env["OPENAI_BASE_URL"] == "http://127.0.0.1:9090/minimax/v1"
+def test_root_help_only_lists_start_command():
+    result = CliRunner().invoke(main, ["--help"])
+    assert result.exit_code == 0
+    assert "start" in result.output
+    for legacy in ("claude", "gemini", "codex", "privacy-start"):
+        assert legacy not in result.output
 
 
-class TestRunCommand:
-    """Tests for the 'run' CLI command with MiniMax provider."""
+def test_start_help_exposes_standalone_options():
+    result = CliRunner().invoke(main, ["start", "--help"])
+    assert result.exit_code == 0
+    assert "--upstream-base-url" in result.output
+    assert "--archive-dir" in result.output
+    assert "--exporter" in result.output
 
-    def test_minimax_in_provider_choices(self):
-        runner = CliRunner()
-        result = runner.invoke(main, ["run", "--help"])
-        assert "minimax" in result.output
 
-    @patch("tokentap.cli.subprocess.run")
-    def test_run_minimax_provider(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0)
-        runner = CliRunner()
-        result = runner.invoke(
-            main, ["run", "--provider", "minimax", "python", "test.py"]
-        )
-        assert result.exit_code == 0
-        call_env = mock_run.call_args[1]["env"]
-        assert "/minimax/v1" in call_env["OPENAI_BASE_URL"]
+def test_langfuse_selection_falls_back_to_file(
+    monkeypatch, tmp_path
+):
+    from privacytap import cli
+
+    messages = []
+    monkeypatch.setattr(
+        cli.click, "echo", lambda message: messages.append(str(message))
+    )
+    exporter = cli.build_exporter(
+        "langfuse",
+        tmp_path,
+        langfuse_factory=lambda: (_ for _ in ()).throw(
+            RuntimeError("unavailable")
+        ),
+    )
+    exporter.export(
+        {
+            "timestamp": "2026-06-19T00:00:00",
+            "provider": "openai-compatible",
+            "model": "demo",
+            "tokens": 0,
+            "request": {},
+            "response": {},
+            "privacy": {"detected": {}, "processing_ms": 0},
+        }
+    )
+    assert any("Langfuse unavailable" in message for message in messages)
+    assert len(list(tmp_path.glob("*.json"))) == 1

@@ -9,12 +9,11 @@ from typing import Callable
 import aiohttp
 from aiohttp import web
 
-from tokentap.parser import count_tokens
-from tokentap.privacy.models import (
+from privacytap.privacy.models import (
     SanitizedPayload,
     SensitiveCredentialError,
 )
-from tokentap.privacy.transformer import restore_payload, sanitize_payload
+from privacytap.privacy.transformer import restore_payload, sanitize_payload
 
 
 LOGGER = logging.getLogger(__name__)
@@ -169,16 +168,12 @@ class PrivacyProxyServer:
     def _build_safe_event(
         sanitized: SanitizedPayload, safe_response: dict
     ) -> dict:
-        request_text = json.dumps(
-            sanitized.payload, ensure_ascii=False
-        )
         usage = safe_response.get("usage") or {}
         return {
             "timestamp": datetime.now().isoformat(),
             "provider": "openai-compatible",
             "model": sanitized.payload.get("model", "unknown"),
-            "tokens": usage.get("total_tokens")
-            or count_tokens(request_text),
+            "tokens": int(usage.get("total_tokens") or 0),
             "request": sanitized.payload,
             "response": safe_response,
             "privacy": {

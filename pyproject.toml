@@ -3,16 +3,16 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tokentap"
-version = "0.1.1"
-description = "Token tracker for LLM CLI tools with live terminal dashboard"
+name = "privacytap"
+version = "0.1.0"
+description = "Full-chain reversible anonymization proxy for OpenAI-compatible LLM calls"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    {name = "Juan Munoz"}
+    {name = "PrivacyTap contributors"}
 ]
-keywords = ["llm", "tokens", "claude", "anthropic", "openai", "gemini", "cli", "token-tracking"]
+keywords = ["llm", "privacy", "pii", "proxy", "anonymization", "openai"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -27,8 +27,6 @@ classifiers = [
 ]
 dependencies = [
     "aiohttp>=3.9.0,<4",
-    "rich>=13.0.0,<16",
-    "tiktoken>=0.5.0,<1",
     "click>=8.0.0,<9",
 ]
 
@@ -43,12 +41,13 @@ dev = [
 langfuse = ["langfuse>=4,<5"]
 
 [project.urls]
-Homepage = "https://tokentap.ai"
-Repository = "https://github.com/jmuncor/tokentap"
-Issues = "https://github.com/jmuncor/tokentap/issues"
+Homepage = "https://github.com/aRookiehuang/privacyTap"
+Repository = "https://github.com/aRookiehuang/privacyTap"
+Issues = "https://github.com/aRookiehuang/privacyTap/issues"
 
 [project.scripts]
-tokentap = "tokentap.cli:main"
+privacytap = "privacytap.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["privacytap*", "integrations*"]

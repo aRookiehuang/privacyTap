@@ -1,7 +1,7 @@
 import pytest
 
-from tokentap.privacy.detectors import detect_sensitive
-from tokentap.privacy.models import EntityType
+from privacytap.privacy.detectors import detect_sensitive
+from privacytap.privacy.models import EntityType
 
 
 @pytest.mark.parametrize(

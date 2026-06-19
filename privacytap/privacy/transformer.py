@@ -5,15 +5,15 @@ import time
 from collections import Counter
 from typing import Any
 
-from tokentap.privacy.detectors import detect_sensitive
-from tokentap.privacy.models import (
+from privacytap.privacy.detectors import detect_sensitive
+from privacytap.privacy.models import (
     EntityType,
     Finding,
     SanitizedPayload,
     SensitiveCredentialError,
     TransformStats,
 )
-from tokentap.privacy.vault import RequestVault
+from privacytap.privacy.vault import RequestVault
 
 
 def _sanitize_text(

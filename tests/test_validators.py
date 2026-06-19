@@ -1,4 +1,4 @@
-from tokentap.privacy.validators import is_valid_cn_id, is_valid_luhn
+from privacytap.privacy.validators import is_valid_cn_id, is_valid_luhn
 
 
 def test_valid_cn_id_checksum():

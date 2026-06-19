@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from tokentap.privacy.models import EntityType
+from privacytap.privacy.models import EntityType
 
 
 class RequestVault:

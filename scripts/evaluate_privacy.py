@@ -3,9 +3,9 @@ import sys
 import time
 from pathlib import Path
 
-from tokentap.privacy.detectors import detect_sensitive
-from tokentap.privacy.models import SensitiveCredentialError
-from tokentap.privacy.transformer import sanitize_payload
+from privacytap.privacy.detectors import detect_sensitive
+from privacytap.privacy.models import SensitiveCredentialError
+from privacytap.privacy.transformer import sanitize_payload
 
 
 ROOT = Path(__file__).resolve().parents[1]

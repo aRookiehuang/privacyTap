@@ -1,7 +1,7 @@
 import pytest
 
-from tokentap.privacy.models import SensitiveCredentialError
-from tokentap.privacy.transformer import restore_payload, sanitize_payload
+from privacytap.privacy.models import SensitiveCredentialError
+from privacytap.privacy.transformer import restore_payload, sanitize_payload
 
 
 def test_sanitizes_nested_openai_payload_and_restores_response():

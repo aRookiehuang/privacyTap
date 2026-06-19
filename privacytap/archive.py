@@ -37,3 +37,13 @@ def save_safe_event(event: dict, output_dir: Path) -> tuple[Path, Path]:
     ]
     md_path.write_text("\n".join(lines), encoding="utf-8")
     return md_path, json_path
+
+
+class FileExporter:
+    """Persist sanitized events as JSON and Markdown."""
+
+    def __init__(self, output_dir: Path) -> None:
+        self.output_dir = output_dir
+
+    def export(self, event: dict) -> None:
+        save_safe_event(event, self.output_dir)

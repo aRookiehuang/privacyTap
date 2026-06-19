@@ -1,5 +1,5 @@
-from tokentap.privacy.models import EntityType
-from tokentap.privacy.vault import RequestVault
+from privacytap.privacy.models import EntityType
+from privacytap.privacy.vault import RequestVault
 
 
 def test_same_value_gets_same_placeholder():

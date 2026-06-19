@@ -1,6 +1,6 @@
 import json
 
-from tokentap.safe_archive import save_safe_event
+from privacytap.archive import FileExporter, save_safe_event
 
 
 def test_archive_contains_only_sanitized_data(tmp_path):
@@ -24,3 +24,17 @@ def test_archive_contains_only_sanitized_data(tmp_path):
     json_file = next(path for path in files if path.suffix == ".json")
     parsed = json.loads(json_file.read_text(encoding="utf-8"))
     assert parsed["privacy"]["detected"]["PHONE"] == 1
+
+
+def test_file_exporter_delegates_to_safe_archive(tmp_path):
+    event = {
+        "timestamp": "2026-06-18T12:00:00",
+        "provider": "openai-compatible",
+        "model": "demo-model",
+        "tokens": 0,
+        "request": {},
+        "response": {},
+        "privacy": {"detected": {}, "processing_ms": 0.1},
+    }
+    FileExporter(tmp_path).export(event)
+    assert len(list(tmp_path.glob("*.json"))) == 1

@@ -1,8 +1,8 @@
 import re
 from collections.abc import Iterable
 
-from tokentap.privacy.models import EntityType, Finding
-from tokentap.privacy.validators import is_valid_cn_id, is_valid_luhn
+from privacytap.privacy.models import EntityType, Finding
+from privacytap.privacy.validators import is_valid_cn_id, is_valid_luhn
 
 
 PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")

@@ -1,6 +1,6 @@
 """Privacy detection and reversible anonymization primitives."""
 
-from tokentap.privacy.models import (
+from privacytap.privacy.models import (
     EntityType,
     Finding,
     SanitizedPayload,
