@@ -1,5 +1,10 @@
 # PrivacyTap 实验设计
 
+> 本文件保留为快速实验索引。课程提交所需的研究问题、课程符合性、对照组、
+> 证据充分性、可信度评分、完整步骤、结果表和报告结构见
+> [课程完整实验计划](course-experiment-plan.md)；操作命令见
+> [完整使用手册](user-manual.md)。
+
 ## 1. 检测数据集
 
 `tests/fixtures/privacy_cases.json` 为人工标注数据，包含六类正例以及容易误判的普通数字、错误校验值、短 Token 和不完整邮箱。
@@ -156,3 +161,11 @@ Remove-Item .\claude-privacytap-settings.json
 ```
 
 实验报告只填写命令的真实输出，不预先编造数据。
+
+## 8. 证据结论规则
+
+- 上游无泄露结论必须由可控 Mock 上游实际捕获的请求证明；
+- 实现稳定性由自动化测试、覆盖率和人工标注数据集证明；
+- 真实可用性由 Codex 或 Claude Code 二进制经过 PrivacyTap 运行证明；
+- 真实云端实验需要有效 API Key，无 Key 时必须明确标记为未执行；
+- Mock 安全证据和真实 CLI 兼容证据作用不同，不能互相替代。
