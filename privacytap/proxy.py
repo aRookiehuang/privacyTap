@@ -14,6 +14,10 @@ from privacytap.privacy.models import (
     SensitiveCredentialError,
 )
 from privacytap.privacy.transformer import restore_payload, sanitize_payload
+from privacytap.responses import (
+    OpenAIResponsesAdapter,
+    response_headers,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -27,6 +31,7 @@ class PrivacyProxyServer:
         port: int,
         upstream_base_url: str,
         on_safe_event: Callable[[dict], None] | None = None,
+        upstream_timeout: float = 300.0,
     ) -> None:
         self.port = port
         self.upstream_base_url = upstream_base_url.rstrip("/")
@@ -34,6 +39,11 @@ class PrivacyProxyServer:
         self.app = web.Application(client_max_size=2 * 1024 * 1024)
         self.app.router.add_post(
             "/v1/chat/completions", self.handle_chat_completions
+        )
+        self.app.router.add_post("/v1/responses", self.handle_responses)
+        self.responses = OpenAIResponsesAdapter(
+            self.upstream_base_url,
+            timeout_seconds=upstream_timeout,
         )
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
@@ -165,6 +175,115 @@ class PrivacyProxyServer:
             )
 
     @staticmethod
+    def _bearer_credentials(request: web.Request) -> set[str]:
+        value = request.headers.get("Authorization", "")
+        scheme, separator, credential = value.partition(" ")
+        if (
+            separator
+            and scheme.lower() == "bearer"
+            and credential.strip()
+        ):
+            return {credential.strip()}
+        return set()
+
+    def _emit_safe_event(self, event: dict) -> None:
+        if self.on_safe_event is None:
+            return
+        try:
+            self.on_safe_event(event)
+        except Exception:
+            LOGGER.warning("safe event callback failed")
+
+    def _credential_error(
+        self, exc: SensitiveCredentialError
+    ) -> web.Response:
+        return self._error(
+            422,
+            "sensitive_credential_detected",
+            (
+                f"Blocked {len(exc.findings)} credential-like "
+                "value(s); remove them and retry"
+            ),
+        )
+
+    async def handle_responses(
+        self, request: web.Request
+    ) -> web.StreamResponse:
+        try:
+            original_payload = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+            return self._error(
+                400, "invalid_json", "Request body must be a JSON object"
+            )
+        if not isinstance(original_payload, dict):
+            return self._error(
+                400, "invalid_json", "Request body must be a JSON object"
+            )
+        if original_payload.get("stream") is True:
+            return self._error(
+                400,
+                "streaming_not_supported",
+                "Responses streaming support is not enabled yet",
+            )
+
+        try:
+            sanitized = sanitize_payload(
+                original_payload,
+                blocked_credentials=self._bearer_credentials(request),
+            )
+        except SensitiveCredentialError as exc:
+            return self._credential_error(exc)
+
+        upstream = None
+        try:
+            upstream = await self.responses.post(
+                request.headers, sanitized.payload
+            )
+            content_type = upstream.response.headers.get(
+                "Content-Type", ""
+            )
+            raw_response = await upstream.response.read()
+            headers = response_headers(upstream.response.headers)
+            if "application/json" not in content_type:
+                return web.Response(
+                    status=upstream.response.status,
+                    headers=headers,
+                    body=raw_response,
+                )
+            try:
+                safe_response = json.loads(raw_response)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return self._error(
+                    502,
+                    "invalid_upstream_json",
+                    "Upstream returned invalid JSON",
+                )
+            if not isinstance(safe_response, dict):
+                return self._error(
+                    502,
+                    "invalid_upstream_json",
+                    "Upstream returned invalid JSON",
+                )
+
+            self._emit_safe_event(
+                self._build_responses_event(sanitized, safe_response)
+            )
+            return web.json_response(
+                restore_payload(safe_response, sanitized.vault),
+                status=upstream.response.status,
+                headers=headers,
+            )
+        except aiohttp.ClientError:
+            return self._error(
+                502,
+                "upstream_unavailable",
+                "Unable to reach upstream model API",
+            )
+        finally:
+            if upstream is not None:
+                await upstream.close()
+
+    @staticmethod
     def _build_safe_event(
         sanitized: SanitizedPayload, safe_response: dict
     ) -> dict:
@@ -174,6 +293,37 @@ class PrivacyProxyServer:
             "provider": "openai-compatible",
             "model": sanitized.payload.get("model", "unknown"),
             "tokens": int(usage.get("total_tokens") or 0),
+            "request": sanitized.payload,
+            "response": safe_response,
+            "privacy": {
+                "detected": sanitized.stats.detected,
+                "processing_ms": round(
+                    sanitized.stats.processing_ms, 3
+                ),
+                "placeholder_count": sanitized.vault.placeholder_count,
+            },
+        }
+
+    @staticmethod
+    def _build_responses_event(
+        sanitized: SanitizedPayload, safe_response: dict | list
+    ) -> dict:
+        response_object = (
+            safe_response if isinstance(safe_response, dict) else {}
+        )
+        usage = response_object.get("usage") or {}
+        tokens = int(
+            usage.get("total_tokens")
+            or (
+                int(usage.get("input_tokens") or 0)
+                + int(usage.get("output_tokens") or 0)
+            )
+        )
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "provider": "openai-responses",
+            "model": sanitized.payload.get("model", "unknown"),
+            "tokens": tokens,
             "request": sanitized.payload,
             "response": safe_response,
             "privacy": {
