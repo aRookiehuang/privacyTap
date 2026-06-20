@@ -50,4 +50,4 @@ privacytap = "privacytap.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["privacytap*", "integrations*"]
+include = ["privacytap*", "integrations*", "examples*"]

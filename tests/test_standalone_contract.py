@@ -18,6 +18,14 @@ def test_project_metadata_is_standalone():
     assert 'tokentap = ' not in metadata
 
 
+def test_package_metadata_includes_installed_examples():
+    metadata = Path("pyproject.toml").read_text(encoding="utf-8")
+    assert 'include = ["privacytap*", "integrations*", "examples*"]' in (
+        metadata
+    )
+    assert Path("examples/__init__.py").exists()
+
+
 def test_readme_documents_real_codex_responses_setup():
     readme = Path("README.md").read_text(encoding="utf-8")
     assert 'wire_api = "responses"' in readme

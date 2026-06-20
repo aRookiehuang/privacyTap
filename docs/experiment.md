@@ -121,14 +121,22 @@ codex --profile privacytap
 ### 安装的 Claude Code协议验证
 
 ```powershell
-$env:ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
-$env:ANTHROPIC_API_KEY="sk-ant-local-test-key-123456"
-claude --bare -p "Reply with exactly OK"
+$settings = @{
+  env = @{
+    ANTHROPIC_BASE_URL = "http://127.0.0.1:8080"
+    ANTHROPIC_API_KEY = "sk-ant-local-test-key-123456"
+  }
+} | ConvertTo-Json -Depth 3
+$settings | Set-Content .\claude-privacytap-settings.json
+claude --bare --settings .\claude-privacytap-settings.json `
+  -p --no-session-persistence "Reply with exactly OK"
+Remove-Item .\claude-privacytap-settings.json
 ```
 
 验证对象是本机安装的 Claude Code二进制，而非自写 HTTP 客户端。Mock 用于
 证明 Claude Code实际使用 Anthropic Messages协议以及 PrivacyTap 上游数据
-已脱敏。
+已脱敏。显式 `--settings` 用于避免已有用户或管理设置覆盖验证所需的网关
+环境变量。
 
 ### 真实 Anthropic云端验证
 

@@ -21,11 +21,17 @@ def extract_text(payload: dict) -> str:
     return ""
 
 
+def mock_reply_text(input_text: str) -> str:
+    if "Reply with exactly OK" in input_text:
+        return "OK"
+    return f"上游实际收到：{input_text}"
+
+
 async def messages(request: web.Request) -> web.StreamResponse:
     payload = await request.json()
     print("ANTHROPIC UPSTREAM RECEIVED:")
     print(json.dumps(payload, ensure_ascii=False, indent=2))
-    text = f"上游实际收到：{extract_text(payload)}"
+    text = mock_reply_text(extract_text(payload))
     message = {
         "id": "msg_privacytap_demo",
         "type": "message",

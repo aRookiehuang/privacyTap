@@ -39,3 +39,10 @@ def test_mock_anthropic_exposes_gateway_routes():
     }
     assert "/v1/messages" in routes
     assert "/v1/messages/count_tokens" in routes
+
+
+def test_mock_anthropic_returns_exact_ok_for_protocol_smoke():
+    from examples.mock_anthropic_upstream import mock_reply_text
+
+    assert mock_reply_text("Reply with exactly OK") == "OK"
+    assert mock_reply_text("hello") == "上游实际收到：hello"

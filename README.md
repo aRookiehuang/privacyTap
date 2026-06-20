@@ -155,6 +155,27 @@ claude --bare -p "Reply with exactly OK"
 `--bare` 模式不会读取 Claude 订阅 OAuth或系统 Keychain，只使用
 `ANTHROPIC_API_KEY` 或显式 key helper。
 
+如果已有 Claude 用户/管理设置覆盖了终端环境变量，可创建一个不提交到 Git
+的临时设置文件：
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8080",
+    "ANTHROPIC_API_KEY": "sk-ant-..."
+  }
+}
+```
+
+然后运行：
+
+```powershell
+claude --bare --settings .\claude-privacytap-settings.json `
+  -p --no-session-persistence "Reply with exactly OK"
+```
+
+验证后删除该文件，切勿提交 API Key。
+
 PrivacyTap 会转发 `x-api-key`、`anthropic-version`、`anthropic-beta` 和
 Claude Code会话标识 Header，但这些 Header 不会写入安全归档。
 
@@ -187,10 +208,19 @@ Anthropic 上游只看到占位符，Claude Code收到恢复后的 `text_delta` 
 ### Terminal 3：真实 Claude Code二进制
 
 ```powershell
-$env:ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
-$env:ANTHROPIC_API_KEY="sk-ant-local-test-key-123456"
+$settings = @{
+  env = @{
+    ANTHROPIC_BASE_URL = "http://127.0.0.1:8080"
+    ANTHROPIC_API_KEY = "sk-ant-local-test-key-123456"
+  }
+} | ConvertTo-Json -Depth 3
 
-claude --bare -p "Reply with exactly OK"
+$settings | Set-Content .\claude-privacytap-settings.json
+
+claude --bare --settings .\claude-privacytap-settings.json `
+  -p --no-session-persistence "Reply with exactly OK"
+
+Remove-Item .\claude-privacytap-settings.json
 ```
 
 该演示使用真实安装的 Claude Code CLI，但模型上游为本地可控 Mock，可直接
