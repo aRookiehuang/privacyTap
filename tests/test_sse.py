@@ -53,3 +53,36 @@ def test_encode_sse_produces_parseable_frame():
     assert feed_chunks([encoded]) == [
         SSEEvent(event="demo", data='{"ok":true}')
     ]
+
+
+def test_event_id_and_retry_round_trip():
+    event = SSEEvent(
+        event="demo",
+        data="first\nsecond",
+        event_id="event-1",
+        retry=500,
+    )
+    assert feed_chunks([encode_sse(event)]) == [event]
+
+
+def test_invalid_retry_is_rejected():
+    parser = SSEParser()
+    with pytest.raises(SSEDecodeError, match="invalid retry"):
+        parser.feed(b"retry: later\ndata: demo\n\n")
+
+
+def test_comment_only_frame_is_ignored():
+    assert feed_chunks([b": keepalive\n\n"]) == []
+
+
+def test_invalid_utf8_is_rejected_during_feed():
+    parser = SSEParser()
+    with pytest.raises(SSEDecodeError, match="invalid UTF-8"):
+        parser.feed(b"\xff")
+
+
+def test_incomplete_utf8_is_rejected_during_finish():
+    parser = SSEParser()
+    parser.feed(b"\xe4")
+    with pytest.raises(SSEDecodeError, match="invalid UTF-8"):
+        parser.finish()
