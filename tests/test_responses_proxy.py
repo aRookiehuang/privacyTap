@@ -1,5 +1,7 @@
 import json
+import asyncio
 
+import aiohttp
 import pytest
 from aiohttp import ClientSession, web
 
@@ -89,6 +91,138 @@ async def test_responses_json_anonymizes_upstream_and_restores_client(
         assert (
             events[0]["response"]["output"][0]["content"][0]["text"]
             == "联系 [PHONE_1]"
+        )
+    finally:
+        await proxy.stop()
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_responses_rejects_current_header_key_in_prompt(
+    unused_tcp_port,
+):
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        return web.json_response({})
+
+    runner = await start_responses_upstream(unused_tcp_port, handler)
+    proxy = PrivacyProxyServer(
+        port=0,
+        upstream_base_url=f"http://127.0.0.1:{unused_tcp_port}",
+    )
+    await proxy.start()
+    transport_key = "sk-proj-currenttransportkey123456"
+    try:
+        async with ClientSession() as session:
+            response = await session.post(
+                f"http://127.0.0.1:{proxy.bound_port}/v1/responses",
+                headers={"Authorization": f"Bearer {transport_key}"},
+                json={
+                    "model": "gpt-5.4",
+                    "input": f"不要泄露 {transport_key}",
+                },
+            )
+            body = await response.json()
+        assert response.status == 422
+        assert body["error"]["code"] == "sensitive_credential_detected"
+        assert transport_key not in json.dumps(body)
+        assert calls == 0
+    finally:
+        await proxy.stop()
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_responses_maps_connect_error_to_502():
+    class FailingAdapter:
+        async def post(self, headers, payload):
+            raise aiohttp.ClientConnectionError("connection refused")
+
+    proxy = PrivacyProxyServer(
+        port=0,
+        upstream_base_url="http://127.0.0.1:9",
+        upstream_timeout=0.1,
+    )
+    proxy.responses = FailingAdapter()
+    await proxy.start()
+    try:
+        async with ClientSession() as session:
+            response = await session.post(
+                f"http://127.0.0.1:{proxy.bound_port}/v1/responses",
+                json={"model": "gpt-5.4", "input": "hello"},
+            )
+            body = await response.json()
+        assert response.status == 502
+        assert body["error"]["code"] == "upstream_unavailable"
+    finally:
+        await proxy.stop()
+
+
+@pytest.mark.asyncio
+async def test_responses_maps_timeout_to_504(unused_tcp_port):
+    async def handler(request):
+        await asyncio.sleep(0.2)
+        return web.json_response({})
+
+    runner = await start_responses_upstream(unused_tcp_port, handler)
+    proxy = PrivacyProxyServer(
+        port=0,
+        upstream_base_url=f"http://127.0.0.1:{unused_tcp_port}",
+        upstream_timeout=0.01,
+    )
+    await proxy.start()
+    try:
+        async with ClientSession() as session:
+            response = await session.post(
+                f"http://127.0.0.1:{proxy.bound_port}/v1/responses",
+                json={"model": "gpt-5.4", "input": "hello"},
+            )
+            body = await response.json()
+        assert response.status == 504
+        assert body["error"]["code"] == "upstream_timeout"
+    finally:
+        await proxy.stop()
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_invalid_upstream_sse_is_not_forwarded(unused_tcp_port):
+    async def handler(request):
+        response = web.StreamResponse(
+            headers={"Content-Type": "text/event-stream"}
+        )
+        await response.prepare(request)
+        await response.write(b"event: response.output_text.delta\n")
+        await response.write(b"data: not-json\n\n")
+        await response.write_eof()
+        return response
+
+    runner = await start_responses_upstream(unused_tcp_port, handler)
+    events = []
+    proxy = PrivacyProxyServer(
+        port=0,
+        upstream_base_url=f"http://127.0.0.1:{unused_tcp_port}",
+        on_safe_event=events.append,
+    )
+    await proxy.start()
+    try:
+        async with ClientSession() as session:
+            response = await session.post(
+                f"http://127.0.0.1:{proxy.bound_port}/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "input": "电话 13800138000",
+                    "stream": True,
+                },
+            )
+            raw = await response.read()
+        assert response.status == 200
+        assert b"not-json" not in raw
+        assert "13800138000" not in json.dumps(
+            events, ensure_ascii=False
         )
     finally:
         await proxy.stop()

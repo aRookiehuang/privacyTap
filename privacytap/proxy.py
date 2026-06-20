@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import ssl
@@ -19,7 +20,7 @@ from privacytap.responses import (
     ResponsesEventRestorer,
     response_headers,
 )
-from privacytap.sse import SSEParser, encode_sse
+from privacytap.sse import SSEDecodeError, SSEParser, encode_sse
 
 
 LOGGER = logging.getLogger(__name__)
@@ -169,6 +170,12 @@ class PrivacyProxyServer:
                         status=upstream.status,
                         headers=response_headers,
                     )
+        except asyncio.TimeoutError:
+            return self._error(
+                504,
+                "upstream_timeout",
+                "Upstream model API timed out",
+            )
         except aiohttp.ClientError:
             return self._error(
                 502,
@@ -272,6 +279,12 @@ class PrivacyProxyServer:
                 status=upstream.response.status,
                 headers=headers,
             )
+        except asyncio.TimeoutError:
+            return self._error(
+                504,
+                "upstream_timeout",
+                "Upstream model API timed out",
+            )
         except aiohttp.ClientError:
             return self._error(
                 502,
@@ -312,14 +325,24 @@ class PrivacyProxyServer:
                 for restored in restorer.transform(event):
                     await client.write(encode_sse(restored))
 
-        async for chunk in upstream.response.content.iter_any():
-            await process_events(parser.feed(chunk))
-        await process_events(parser.finish())
-        restorer.finish()
-        self._emit_safe_event(
-            self._build_responses_event(sanitized, safe_events)
-        )
-        await client.write_eof()
+        try:
+            async for chunk in upstream.response.content.iter_any():
+                await process_events(parser.feed(chunk))
+            await process_events(parser.finish())
+            restorer.finish()
+        except (json.JSONDecodeError, SSEDecodeError):
+            LOGGER.warning("invalid upstream Responses SSE stream")
+            safe_events.append(
+                {
+                    "event": "privacytap.error",
+                    "data": {"code": "invalid_upstream_sse"},
+                }
+            )
+        finally:
+            self._emit_safe_event(
+                self._build_responses_event(sanitized, safe_events)
+            )
+            await client.write_eof()
         return client
 
     @staticmethod

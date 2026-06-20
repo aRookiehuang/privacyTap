@@ -23,6 +23,16 @@ async def start_upstream(port, handler):
     return runner
 
 
+async def start_responses_upstream(port, handler):
+    app = web.Application()
+    app.router.add_post("/v1/responses", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", port)
+    await site.start()
+    return runner
+
+
 @pytest.mark.asyncio
 async def test_fifty_concurrent_requests_keep_vaults_isolated(
     unused_tcp_port,
@@ -85,6 +95,77 @@ async def test_fifty_concurrent_requests_keep_vaults_isolated(
         assert len(upstream_payloads) == 50
         assert all(
             payload["messages"][0]["content"] == "电话 [PHONE_1]"
+            for payload in upstream_payloads
+        )
+        assert_secrets_absent(events, phones)
+    finally:
+        await proxy.stop()
+        await upstream_runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_responses_requests_keep_vaults_isolated(
+    unused_tcp_port,
+):
+    upstream_payloads = []
+
+    async def upstream_handler(request):
+        payload = await request.json()
+        upstream_payloads.append(payload)
+        return web.json_response(
+            {
+                "id": "resp_demo",
+                "object": "response",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": payload["input"],
+                            }
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+        )
+
+    upstream_runner = await start_responses_upstream(
+        unused_tcp_port, upstream_handler
+    )
+    events = []
+    proxy = PrivacyProxyServer(
+        port=0,
+        upstream_base_url=f"http://127.0.0.1:{unused_tcp_port}",
+        on_safe_event=events.append,
+    )
+    await proxy.start()
+    phones = [str(13000000000 + index) for index in range(50)]
+
+    async def send(session: ClientSession, phone: str) -> str:
+        response = await session.post(
+            f"http://127.0.0.1:{proxy.bound_port}/v1/responses",
+            json={
+                "model": "gpt-5.4",
+                "input": f"电话 {phone}",
+                "stream": False,
+            },
+        )
+        assert response.status == 200
+        body = await response.json()
+        return body["output"][0]["content"][0]["text"]
+
+    try:
+        async with ClientSession() as session:
+            outputs = await asyncio.gather(
+                *(send(session, phone) for phone in phones)
+            )
+        assert outputs == [f"电话 {phone}" for phone in phones]
+        assert len(upstream_payloads) == 50
+        assert all(
+            payload["input"] == "电话 [PHONE_1]"
             for payload in upstream_payloads
         )
         assert_secrets_absent(events, phones)
