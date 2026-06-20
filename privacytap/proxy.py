@@ -16,8 +16,10 @@ from privacytap.privacy.models import (
 from privacytap.privacy.transformer import restore_payload, sanitize_payload
 from privacytap.responses import (
     OpenAIResponsesAdapter,
+    ResponsesEventRestorer,
     response_headers,
 )
+from privacytap.sse import SSEParser, encode_sse
 
 
 LOGGER = logging.getLogger(__name__)
@@ -219,13 +221,6 @@ class PrivacyProxyServer:
             return self._error(
                 400, "invalid_json", "Request body must be a JSON object"
             )
-        if original_payload.get("stream") is True:
-            return self._error(
-                400,
-                "streaming_not_supported",
-                "Responses streaming support is not enabled yet",
-            )
-
         try:
             sanitized = sanitize_payload(
                 original_payload,
@@ -242,6 +237,10 @@ class PrivacyProxyServer:
             content_type = upstream.response.headers.get(
                 "Content-Type", ""
             )
+            if "text/event-stream" in content_type:
+                return await self._stream_responses(
+                    request, upstream, sanitized
+                )
             raw_response = await upstream.response.read()
             headers = response_headers(upstream.response.headers)
             if "application/json" not in content_type:
@@ -282,6 +281,46 @@ class PrivacyProxyServer:
         finally:
             if upstream is not None:
                 await upstream.close()
+
+    async def _stream_responses(
+        self,
+        request: web.Request,
+        upstream,
+        sanitized: SanitizedPayload,
+    ) -> web.StreamResponse:
+        headers = response_headers(upstream.response.headers)
+        headers["Content-Type"] = "text/event-stream"
+        headers.setdefault("Cache-Control", "no-cache")
+        client = web.StreamResponse(
+            status=upstream.response.status,
+            headers=headers,
+        )
+        await client.prepare(request)
+        parser = SSEParser()
+        restorer = ResponsesEventRestorer(sanitized.vault)
+        safe_events: list[dict] = []
+
+        async def process_events(events) -> None:
+            for event in events:
+                if event.data == "[DONE]":
+                    safe_data = "[DONE]"
+                else:
+                    safe_data = json.loads(event.data)
+                safe_events.append(
+                    {"event": event.event, "data": safe_data}
+                )
+                for restored in restorer.transform(event):
+                    await client.write(encode_sse(restored))
+
+        async for chunk in upstream.response.content.iter_any():
+            await process_events(parser.feed(chunk))
+        await process_events(parser.finish())
+        restorer.finish()
+        self._emit_safe_event(
+            self._build_responses_event(sanitized, safe_events)
+        )
+        await client.write_eof()
+        return client
 
     @staticmethod
     def _build_safe_event(
