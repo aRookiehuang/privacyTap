@@ -30,3 +30,12 @@ def test_two_vaults_are_isolated():
     second.get_or_create(EntityType.EMAIL, "second@example.com")
     assert first.restore_text("[EMAIL_1]") == "first@example.com"
     assert second.restore_text("[EMAIL_1]") == "second@example.com"
+
+
+def test_placeholders_are_exposed_without_original_values():
+    vault = RequestVault()
+    placeholder = vault.get_or_create(
+        EntityType.EMAIL, "alice@example.com"
+    )
+    assert vault.placeholders == (placeholder,)
+    assert "alice@example.com" not in repr(vault.placeholders)

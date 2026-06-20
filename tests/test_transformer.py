@@ -51,6 +51,28 @@ def test_api_key_blocks_before_result_is_returned():
         sanitize_payload(source)
 
 
+def test_current_transport_key_is_blocked_exactly():
+    transport_key = "sk-proj-currenttransportkey123456"
+    with pytest.raises(SensitiveCredentialError):
+        sanitize_payload(
+            {"input": f"不要泄露 {transport_key}"},
+            blocked_credentials={transport_key},
+        )
+
+
+def test_other_credential_like_text_is_reversibly_sanitized():
+    example_key = "sk-proj-examplecredential123456789"
+    result = sanitize_payload(
+        {"input": f"请审查代码中的 {example_key}"},
+        blocked_credentials={"sk-proj-currenttransportkey123456"},
+    )
+    assert result.payload["input"] == "请审查代码中的 [CREDENTIAL_1]"
+    assert (
+        restore_payload(result.payload, result.vault)["input"]
+        == f"请审查代码中的 {example_key}"
+    )
+
+
 def test_non_text_values_are_preserved():
     source = {
         "model": "demo-model",

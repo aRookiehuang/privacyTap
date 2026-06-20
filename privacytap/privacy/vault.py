@@ -31,3 +31,7 @@ class RequestVault:
     @property
     def placeholder_count(self) -> int:
         return len(self._reverse)
+
+    @property
+    def placeholders(self) -> tuple[str, ...]:
+        return tuple(self._reverse)

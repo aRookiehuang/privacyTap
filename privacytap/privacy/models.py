@@ -11,6 +11,7 @@ class EntityType(str, Enum):
     EMAIL = "EMAIL"
     BANK_CARD = "BANK_CARD"
     STUDENT_ID = "STUDENT_ID"
+    CREDENTIAL = "CREDENTIAL"
     API_KEY = "API_KEY"
 
 
