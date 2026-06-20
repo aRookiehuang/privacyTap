@@ -19,6 +19,20 @@ def test_start_help_exposes_standalone_options():
     assert "--exporter" in result.output
 
 
+def test_start_help_exposes_openai_provider_and_timeout():
+    result = CliRunner().invoke(main, ["start", "--help"])
+    assert result.exit_code == 0
+    assert "--provider" in result.output
+    assert "--upstream-timeout" in result.output
+    assert "openai" in result.output
+
+
+def test_openai_upstream_has_a_safe_default():
+    from privacytap.cli import DEFAULT_OPENAI_BASE_URL
+
+    assert DEFAULT_OPENAI_BASE_URL == "https://api.openai.com"
+
+
 def test_langfuse_selection_falls_back_to_file(
     monkeypatch, tmp_path
 ):

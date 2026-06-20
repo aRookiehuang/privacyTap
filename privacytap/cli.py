@@ -13,6 +13,9 @@ from privacytap.exporters import CompositeExporter, SafeEventExporter
 from privacytap.proxy import PrivacyProxyServer
 
 
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com"
+
+
 def _default_langfuse_factory() -> SafeEventExporter:
     from integrations.langfuse_exporter import LangfuseExporter
 
@@ -47,13 +50,26 @@ def main() -> None:
 @main.command()
 @click.option("--port", "-p", default=8080, show_default=True, type=int)
 @click.option(
+    "--provider",
+    type=click.Choice(["openai"]),
+    default="openai",
+    show_default=True,
+)
+@click.option(
     "--upstream-base-url",
     envvar="PRIVACYTAP_UPSTREAM_BASE_URL",
-    required=True,
+    default=DEFAULT_OPENAI_BASE_URL,
+    show_default=True,
     help=(
-        "OpenAI-compatible upstream base URL without "
-        "/v1/chat/completions"
+        "OpenAI upstream base URL without endpoint path"
     ),
+)
+@click.option(
+    "--upstream-timeout",
+    envvar="PRIVACYTAP_UPSTREAM_TIMEOUT",
+    default=300.0,
+    show_default=True,
+    type=click.FloatRange(min=0.1),
 )
 @click.option(
     "--archive-dir",
@@ -69,16 +85,19 @@ def main() -> None:
 )
 def start(
     port: int,
+    provider: str,
     upstream_base_url: str,
+    upstream_timeout: float,
     archive_dir: Path,
     exporter: str,
 ) -> None:
-    """Start the non-streaming OpenAI-compatible privacy proxy."""
+    """Start the OpenAI Responses privacy proxy."""
     safe_exporter = build_exporter(exporter, archive_dir)
     proxy = PrivacyProxyServer(
         port=port,
         upstream_base_url=upstream_base_url,
         on_safe_event=safe_exporter.export,
+        upstream_timeout=upstream_timeout,
     )
 
     async def serve() -> None:
@@ -89,9 +108,10 @@ def start(
                 f"http://127.0.0.1:{proxy.bound_port}"
             )
             click.echo(f"Safe traces: {archive_dir.resolve()}")
+            click.echo(f"Provider: {provider}")
+            click.echo("Codex endpoint: /v1/responses (JSON + SSE)")
             click.echo(
-                "Only non-streaming POST /v1/chat/completions "
-                "is supported."
+                "Legacy endpoint: /v1/chat/completions (non-streaming)"
             )
             await asyncio.Event().wait()
         finally:
