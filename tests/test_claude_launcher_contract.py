@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -36,6 +37,33 @@ def test_launcher_uses_local_proxy_and_ignores_user_settings():
         "--model",
     ):
         assert text in script
+
+
+def test_launcher_parses_in_windows_powershell():
+    command = r"""
+$tokens = $null
+$errors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $env:PRIVACYTAP_LAUNCHER,
+    [ref]$tokens,
+    [ref]$errors
+) | Out-Null
+if ($errors.Count -gt 0) {
+    $errors | ForEach-Object { Write-Error $_.Message }
+    exit 1
+}
+"""
+    env = os.environ.copy()
+    env["PRIVACYTAP_LAUNCHER"] = str(LAUNCHER)
+    result = subprocess.run(
+        ["powershell.exe", "-NoLogo", "-NoProfile", "-Command", command],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    error_output = result.stderr.decode(errors="replace")
+    assert result.returncode == 0, error_output
 
 
 def test_launcher_protects_secret_and_owns_proxy_lifecycle():
