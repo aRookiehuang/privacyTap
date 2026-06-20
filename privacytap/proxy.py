@@ -10,6 +10,11 @@ from typing import Callable
 import aiohttp
 from aiohttp import web
 
+from privacytap.anthropic import (
+    AnthropicEventRestorer,
+    AnthropicMessagesAdapter,
+    anthropic_response_headers,
+)
 from privacytap.privacy.models import (
     SanitizedPayload,
     SensitiveCredentialError,
@@ -44,7 +49,15 @@ class PrivacyProxyServer:
             "/v1/chat/completions", self.handle_chat_completions
         )
         self.app.router.add_post("/v1/responses", self.handle_responses)
+        self.app.router.add_post("/v1/messages", self.handle_messages)
+        self.app.router.add_post(
+            "/v1/messages/count_tokens", self.handle_count_tokens
+        )
         self.responses = OpenAIResponsesAdapter(
+            self.upstream_base_url,
+            timeout_seconds=upstream_timeout,
+        )
+        self.anthropic = AnthropicMessagesAdapter(
             self.upstream_base_url,
             timeout_seconds=upstream_timeout,
         )
@@ -195,6 +208,14 @@ class PrivacyProxyServer:
             return {credential.strip()}
         return set()
 
+    @staticmethod
+    def _anthropic_credentials(request: web.Request) -> set[str]:
+        credentials = PrivacyProxyServer._bearer_credentials(request)
+        api_key = request.headers.get("x-api-key", "").strip()
+        if api_key:
+            credentials.add(api_key)
+        return credentials
+
     def _emit_safe_event(self, event: dict) -> None:
         if self.on_safe_event is None:
             return
@@ -295,6 +316,121 @@ class PrivacyProxyServer:
             if upstream is not None:
                 await upstream.close()
 
+    async def handle_messages(
+        self, request: web.Request
+    ) -> web.StreamResponse:
+        return await self._handle_anthropic_json(
+            request,
+            endpoint="messages",
+            provider="anthropic-messages",
+            restore_response=True,
+        )
+
+    async def handle_count_tokens(
+        self, request: web.Request
+    ) -> web.StreamResponse:
+        return await self._handle_anthropic_json(
+            request,
+            endpoint="count_tokens",
+            provider="anthropic-count-tokens",
+            restore_response=False,
+        )
+
+    async def _handle_anthropic_json(
+        self,
+        request: web.Request,
+        endpoint: str,
+        provider: str,
+        restore_response: bool,
+    ) -> web.StreamResponse:
+        try:
+            original_payload = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+            return self._error(
+                400, "invalid_json", "Request body must be a JSON object"
+            )
+        if not isinstance(original_payload, dict):
+            return self._error(
+                400, "invalid_json", "Request body must be a JSON object"
+            )
+        try:
+            sanitized = sanitize_payload(
+                original_payload,
+                blocked_credentials=self._anthropic_credentials(request),
+            )
+        except SensitiveCredentialError as exc:
+            return self._credential_error(exc)
+
+        upstream = None
+        try:
+            upstream = await self.anthropic.post(
+                endpoint, request.headers, sanitized.payload
+            )
+            content_type = upstream.response.headers.get(
+                "Content-Type", ""
+            )
+            if (
+                endpoint == "messages"
+                and "text/event-stream" in content_type
+            ):
+                return await self._stream_anthropic_messages(
+                    request, upstream, sanitized
+                )
+            raw_response = await upstream.response.read()
+            headers = anthropic_response_headers(
+                upstream.response.headers
+            )
+            if "application/json" not in content_type:
+                return web.Response(
+                    status=upstream.response.status,
+                    headers=headers,
+                    body=raw_response,
+                )
+            try:
+                safe_response = json.loads(raw_response)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return self._error(
+                    502,
+                    "invalid_upstream_json",
+                    "Upstream returned invalid JSON",
+                )
+            if not isinstance(safe_response, dict):
+                return self._error(
+                    502,
+                    "invalid_upstream_json",
+                    "Upstream returned invalid JSON",
+                )
+            self._emit_safe_event(
+                self._build_anthropic_event(
+                    sanitized, safe_response, provider
+                )
+            )
+            body = (
+                restore_payload(safe_response, sanitized.vault)
+                if restore_response
+                else safe_response
+            )
+            return web.json_response(
+                body,
+                status=upstream.response.status,
+                headers=headers,
+            )
+        except asyncio.TimeoutError:
+            return self._error(
+                504,
+                "upstream_timeout",
+                "Upstream model API timed out",
+            )
+        except aiohttp.ClientError:
+            return self._error(
+                502,
+                "upstream_unavailable",
+                "Unable to reach upstream model API",
+            )
+        finally:
+            if upstream is not None:
+                await upstream.close()
+
     async def _stream_responses(
         self,
         request: web.Request,
@@ -346,6 +482,58 @@ class PrivacyProxyServer:
             await client.write_eof()
         return client
 
+    async def _stream_anthropic_messages(
+        self,
+        request: web.Request,
+        upstream,
+        sanitized: SanitizedPayload,
+    ) -> web.StreamResponse:
+        headers = anthropic_response_headers(
+            upstream.response.headers
+        )
+        headers["Content-Type"] = "text/event-stream"
+        headers.setdefault("Cache-Control", "no-cache")
+        client = web.StreamResponse(
+            status=upstream.response.status,
+            headers=headers,
+        )
+        await client.prepare(request)
+        parser = SSEParser()
+        restorer = AnthropicEventRestorer(sanitized.vault)
+        safe_events: list[dict] = []
+
+        async def process_events(events) -> None:
+            for event in events:
+                safe_data = json.loads(event.data)
+                safe_events.append(
+                    {"event": event.event, "data": safe_data}
+                )
+                for restored in restorer.transform(event):
+                    await client.write(encode_sse(restored))
+
+        try:
+            async for chunk in upstream.response.content.iter_any():
+                await process_events(parser.feed(chunk))
+            await process_events(parser.finish())
+            for restored in restorer.finish():
+                await client.write(encode_sse(restored))
+        except (json.JSONDecodeError, SSEDecodeError):
+            LOGGER.warning("invalid upstream Anthropic SSE stream")
+            safe_events.append(
+                {
+                    "event": "privacytap.error",
+                    "data": {"code": "invalid_upstream_sse"},
+                }
+            )
+        finally:
+            self._emit_safe_event(
+                self._build_anthropic_event(
+                    sanitized, safe_events
+                )
+            )
+            await client.write_eof()
+        return client
+
     @staticmethod
     def _build_safe_event(
         sanitized: SanitizedPayload, safe_response: dict
@@ -385,6 +573,35 @@ class PrivacyProxyServer:
         return {
             "timestamp": datetime.now().isoformat(),
             "provider": "openai-responses",
+            "model": sanitized.payload.get("model", "unknown"),
+            "tokens": tokens,
+            "request": sanitized.payload,
+            "response": safe_response,
+            "privacy": {
+                "detected": sanitized.stats.detected,
+                "processing_ms": round(
+                    sanitized.stats.processing_ms, 3
+                ),
+                "placeholder_count": sanitized.vault.placeholder_count,
+            },
+        }
+
+    @staticmethod
+    def _build_anthropic_event(
+        sanitized: SanitizedPayload,
+        safe_response: dict | list,
+        provider: str = "anthropic-messages",
+    ) -> dict:
+        response_object = (
+            safe_response if isinstance(safe_response, dict) else {}
+        )
+        usage = response_object.get("usage") or {}
+        tokens = int(
+            usage.get("input_tokens") or 0
+        ) + int(usage.get("output_tokens") or 0)
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "provider": provider,
             "model": sanitized.payload.get("model", "unknown"),
             "tokens": tokens,
             "request": sanitized.payload,
