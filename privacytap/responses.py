@@ -30,6 +30,10 @@ DELTA_EVENT_TYPES = {
     "response.output_text.delta",
     "response.function_call_arguments.delta",
 }
+DONE_EVENT_TYPES = {
+    "response.output_text.done",
+    "response.function_call_arguments.done",
+}
 
 
 def forward_headers(headers: Mapping[str, str]) -> dict[str, str]:
@@ -50,12 +54,18 @@ def response_headers(headers: Mapping[str, str]) -> dict[str, str]:
 
 def stream_key(payload: dict) -> str | None:
     event_type = payload.get("type")
-    if event_type == "response.output_text.delta":
+    if event_type in {
+        "response.output_text.delta",
+        "response.output_text.done",
+    }:
         return (
             f"text:{payload.get('item_id', '')}:"
             f"{payload.get('content_index', 0)}"
         )
-    if event_type == "response.function_call_arguments.delta":
+    if event_type in {
+        "response.function_call_arguments.delta",
+        "response.function_call_arguments.done",
+    }:
         return (
             "call:"
             f"{payload.get('item_id', payload.get('output_index', 0))}"
@@ -69,6 +79,9 @@ class ResponsesEventRestorer:
     def __init__(self, vault: RequestVault) -> None:
         self._vault = vault
         self._streaming = StreamingRestorer(vault)
+        self._templates: dict[str, tuple[SSEEvent, dict]] = {}
+        self._sequence_offset = 0
+        self._last_sequence = 0
 
     def transform(self, event: SSEEvent) -> list[SSEEvent]:
         if event.data == "[DONE]":
@@ -86,19 +99,70 @@ class ResponsesEventRestorer:
             and payload.get("type") in DELTA_EVENT_TYPES
             and isinstance(payload.get("delta"), str)
         ):
+            self._templates[key] = (event, dict(payload))
             payload["delta"] = self._streaming.feed(
                 key, payload["delta"]
             )
-        else:
-            payload = restore_payload(payload, self._vault)
-        return [self._encode_payload(event, payload)]
+            self._adjust_sequence(payload)
+            return [self._encode_payload(event, payload)]
 
-    def finish(self) -> None:
-        pending = self._streaming.finish_all()
-        if any(pending.values()):
-            raise SSEDecodeError(
-                "response stream ended with an incomplete placeholder prefix"
+        output: list[SSEEvent] = []
+        if key is not None and payload.get("type") in DONE_EVENT_TYPES:
+            pending = self._streaming.finish(key)
+            if pending:
+                output.append(
+                    self._flush_event(key, pending, payload)
+                )
+        elif payload.get("type") == "response.completed":
+            for pending_key, pending in self._streaming.finish_all().items():
+                if pending:
+                    output.append(
+                        self._flush_event(
+                            pending_key, pending, payload
+                        )
+                    )
+
+        payload = restore_payload(payload, self._vault)
+        self._adjust_sequence(payload)
+        output.append(self._encode_payload(event, payload))
+        return output
+
+    def finish(self) -> list[SSEEvent]:
+        output: list[SSEEvent] = []
+        for key, pending in self._streaming.finish_all().items():
+            if pending:
+                output.append(self._flush_event(key, pending))
+        return output
+
+    def _flush_event(
+        self,
+        key: str,
+        pending: str,
+        current_payload: dict | None = None,
+    ) -> SSEEvent:
+        template_event, template_payload = self._templates.pop(key)
+        payload = dict(template_payload)
+        payload["delta"] = pending
+        current_sequence = (
+            current_payload.get("sequence_number")
+            if current_payload is not None
+            else None
+        )
+        if isinstance(current_sequence, int):
+            payload["sequence_number"] = (
+                current_sequence + self._sequence_offset
             )
+            self._sequence_offset += 1
+        else:
+            payload["sequence_number"] = self._last_sequence + 1
+        self._last_sequence = int(payload["sequence_number"])
+        return self._encode_payload(template_event, payload)
+
+    def _adjust_sequence(self, payload: dict) -> None:
+        sequence = payload.get("sequence_number")
+        if isinstance(sequence, int):
+            payload["sequence_number"] = sequence + self._sequence_offset
+            self._last_sequence = int(payload["sequence_number"])
 
     @staticmethod
     def _encode_payload(event: SSEEvent, payload: dict) -> SSEEvent:

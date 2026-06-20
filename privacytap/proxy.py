@@ -329,7 +329,8 @@ class PrivacyProxyServer:
             async for chunk in upstream.response.content.iter_any():
                 await process_events(parser.feed(chunk))
             await process_events(parser.finish())
-            restorer.finish()
+            for restored in restorer.finish():
+                await client.write(encode_sse(restored))
         except (json.JSONDecodeError, SSEDecodeError):
             LOGGER.warning("invalid upstream Responses SSE stream")
             safe_events.append(

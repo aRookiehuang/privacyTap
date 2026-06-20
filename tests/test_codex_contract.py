@@ -52,7 +52,34 @@ def test_invalid_event_data_is_rejected(data):
         restorer.transform(SSEEvent(event="demo", data=data))
 
 
-def test_incomplete_placeholder_prefix_fails_closed():
+def test_incomplete_placeholder_prefix_is_flushed_at_stream_end():
+    vault = RequestVault()
+    vault.get_or_create(EntityType.EMAIL, "alice@example.com")
+    restorer = ResponsesEventRestorer(vault)
+    transformed = restorer.transform(
+        SSEEvent(
+            event="response.output_text.delta",
+            data=json.dumps(
+                {
+                    "type": "response.output_text.delta",
+                    "item_id": "msg_1",
+                    "content_index": 0,
+                    "delta": "[EMAI",
+                    "sequence_number": 1,
+                }
+            ),
+        )
+    )
+    assert json.loads(transformed[0].data)["delta"] == ""
+    flushed = restorer.finish()
+    assert len(flushed) == 1
+    payload = json.loads(flushed[0].data)
+    assert flushed[0].event == "response.output_text.delta"
+    assert payload["delta"] == "[EMAI"
+    assert payload["sequence_number"] == 2
+
+
+def test_flush_before_done_keeps_sequence_numbers_monotonic():
     vault = RequestVault()
     vault.get_or_create(EntityType.EMAIL, "alice@example.com")
     restorer = ResponsesEventRestorer(vault)
@@ -65,9 +92,27 @@ def test_incomplete_placeholder_prefix_fails_closed():
                     "item_id": "msg_1",
                     "content_index": 0,
                     "delta": "[EMAI",
+                    "sequence_number": 4,
                 }
             ),
         )
     )
-    with pytest.raises(SSEDecodeError, match="incomplete placeholder"):
-        restorer.finish()
+    output = restorer.transform(
+        SSEEvent(
+            event="response.output_text.done",
+            data=json.dumps(
+                {
+                    "type": "response.output_text.done",
+                    "item_id": "msg_1",
+                    "content_index": 0,
+                    "text": "[EMAI",
+                    "sequence_number": 5,
+                }
+            ),
+        )
+    )
+    assert [json.loads(event.data)["sequence_number"] for event in output] == [
+        5,
+        6,
+    ]
+    assert json.loads(output[0].data)["delta"] == "[EMAI"
