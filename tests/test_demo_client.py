@@ -28,3 +28,14 @@ def test_mock_responses_upstream_exposes_responses_route():
         for route in app.router.routes()
     }
     assert "/v1/responses" in routes
+
+
+def test_mock_anthropic_exposes_gateway_routes():
+    from examples.mock_anthropic_upstream import app
+
+    routes = {
+        route.resource.canonical
+        for route in app.router.routes()
+    }
+    assert "/v1/messages" in routes
+    assert "/v1/messages/count_tokens" in routes

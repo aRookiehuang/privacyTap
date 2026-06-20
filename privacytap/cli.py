@@ -14,6 +14,15 @@ from privacytap.proxy import PrivacyProxyServer
 
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com"
+DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+DEFAULT_UPSTREAMS = {
+    "openai": DEFAULT_OPENAI_BASE_URL,
+    "anthropic": DEFAULT_ANTHROPIC_BASE_URL,
+}
+
+
+def default_upstream_base_url(provider: str) -> str:
+    return DEFAULT_UPSTREAMS[provider]
 
 
 def _default_langfuse_factory() -> SafeEventExporter:
@@ -51,18 +60,15 @@ def main() -> None:
 @click.option("--port", "-p", default=8080, show_default=True, type=int)
 @click.option(
     "--provider",
-    type=click.Choice(["openai"]),
+    type=click.Choice(["openai", "anthropic"]),
     default="openai",
     show_default=True,
 )
 @click.option(
     "--upstream-base-url",
     envvar="PRIVACYTAP_UPSTREAM_BASE_URL",
-    default=DEFAULT_OPENAI_BASE_URL,
-    show_default=True,
-    help=(
-        "OpenAI upstream base URL without endpoint path"
-    ),
+    default=None,
+    help="Provider upstream base URL without endpoint path",
 )
 @click.option(
     "--upstream-timeout",
@@ -91,7 +97,10 @@ def start(
     archive_dir: Path,
     exporter: str,
 ) -> None:
-    """Start the OpenAI Responses privacy proxy."""
+    """Start the OpenAI or Anthropic privacy proxy."""
+    upstream_base_url = (
+        upstream_base_url or default_upstream_base_url(provider)
+    )
     safe_exporter = build_exporter(exporter, archive_dir)
     proxy = PrivacyProxyServer(
         port=port,
@@ -110,6 +119,10 @@ def start(
             click.echo(f"Safe traces: {archive_dir.resolve()}")
             click.echo(f"Provider: {provider}")
             click.echo("Codex endpoint: /v1/responses (JSON + SSE)")
+            click.echo(
+                "Claude endpoints: /v1/messages and "
+                "/v1/messages/count_tokens"
+            )
             click.echo(
                 "Legacy endpoint: /v1/chat/completions (non-streaming)"
             )

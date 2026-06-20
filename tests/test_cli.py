@@ -27,10 +27,27 @@ def test_start_help_exposes_openai_provider_and_timeout():
     assert "openai" in result.output
 
 
+def test_start_help_lists_anthropic_provider():
+    result = CliRunner().invoke(main, ["start", "--help"])
+    assert result.exit_code == 0
+    assert "openai|anthropic" in result.output
+
+
 def test_openai_upstream_has_a_safe_default():
     from privacytap.cli import DEFAULT_OPENAI_BASE_URL
 
     assert DEFAULT_OPENAI_BASE_URL == "https://api.openai.com"
+
+
+def test_default_upstream_depends_on_provider():
+    from privacytap.cli import default_upstream_base_url
+
+    assert default_upstream_base_url("openai") == (
+        "https://api.openai.com"
+    )
+    assert default_upstream_base_url("anthropic") == (
+        "https://api.anthropic.com"
+    )
 
 
 def test_langfuse_selection_falls_back_to_file(
