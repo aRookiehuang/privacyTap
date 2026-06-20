@@ -27,6 +27,7 @@
 | SSE 分片恢复率 | 每个字符边界切分后正确恢复数 / 总切分数 | 100% |
 | Transform P95 | 检测与替换阶段第 95 百分位 | < 20 ms |
 | Streaming P95 | SSE 增量恢复阶段第 95 百分位 | < 20 ms |
+| Anthropic恢复率 | text_delta 与 input_json_delta 正确恢复数 / 总数 | 100% |
 
 ## 3. 对照实验
 
@@ -98,7 +99,44 @@ codex --profile privacytap
 
 成功率计算为：成功完成次数 / 10。目标不少于 9/10。不得预先填写成功数据。
 
-## 6. 验证命令
+## 6. Claude Code实验
+
+### 可控 Anthropic上游
+
+```powershell
+.\.venv\Scripts\python.exe examples\mock_anthropic_upstream.py
+.\.venv\Scripts\privacytap.exe start `
+  --provider anthropic `
+  --upstream-base-url http://127.0.0.1:18082
+```
+
+采集：
+
+- `/v1/messages` 实际请求；
+- `/v1/messages/count_tokens` 实际请求；
+- Anthropic SSE 上游事件；
+- Claude Code消费的恢复后事件；
+- PrivacyTap安全归档。
+
+### 安装的 Claude Code协议验证
+
+```powershell
+$env:ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
+$env:ANTHROPIC_API_KEY="sk-ant-local-test-key-123456"
+claude --bare -p "Reply with exactly OK"
+```
+
+验证对象是本机安装的 Claude Code二进制，而非自写 HTTP 客户端。Mock 用于
+证明 Claude Code实际使用 Anthropic Messages协议以及 PrivacyTap 上游数据
+已脱敏。
+
+### 真实 Anthropic云端验证
+
+有有效 `ANTHROPIC_API_KEY` 时，将 PrivacyTap 上游改为
+`https://api.anthropic.com`，执行文本任务和文件工具任务。无 Key时只记录为
+外部阻塞，不能用 Mock结果冒充云端成功。
+
+## 7. 验证命令
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q

@@ -24,3 +24,11 @@ def test_readme_documents_real_codex_responses_setup():
     assert "codex --profile privacytap" in readme
     assert "OPENAI_API_KEY" in readme
     assert "/v1/responses" in readme
+
+
+def test_readme_documents_real_claude_code_setup():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "ANTHROPIC_BASE_URL" in readme
+    assert "ANTHROPIC_API_KEY" in readme
+    assert "/v1/messages/count_tokens" in readme
+    assert "claude --bare -p" in readme

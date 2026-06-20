@@ -3,11 +3,13 @@ import sys
 import time
 from pathlib import Path
 
+from privacytap.anthropic import AnthropicEventRestorer
 from privacytap.privacy.detectors import detect_sensitive
 from privacytap.privacy.models import EntityType, SensitiveCredentialError
 from privacytap.privacy.streaming import StreamingRestorer
 from privacytap.privacy.transformer import sanitize_payload
 from privacytap.privacy.vault import RequestVault
+from privacytap.sse import SSEEvent
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -66,6 +68,67 @@ def evaluate_streaming_restoration() -> dict[str, float | int]:
             )
             cases += 1
             correct += int(output == original)
+    return {
+        "cases": cases,
+        "accuracy": correct / cases if cases else 1.0,
+        "leakage_count": leakage_count,
+        "p95_ms": percentile(latencies_ms, 0.95),
+    }
+
+
+def evaluate_anthropic_streaming_restoration() -> dict[str, float | int]:
+    vault = RequestVault()
+    originals = {
+        EntityType.PHONE: "13800138000",
+        EntityType.EMAIL: "alice@example.com",
+        EntityType.STUDENT_ID: "2023123456",
+        EntityType.CREDENTIAL: "sk-ant-examplecredential123456",
+    }
+    placeholders = {
+        vault.get_or_create(entity_type, value): value
+        for entity_type, value in originals.items()
+    }
+    cases = correct = leakage_count = 0
+    latencies_ms: list[float] = []
+    for placeholder, original in placeholders.items():
+        leakage_count += sum(
+            secret in placeholder for secret in originals.values()
+        )
+        for split_at in range(1, len(placeholder)):
+            restorer = AnthropicEventRestorer(vault)
+            started = time.perf_counter()
+            output = []
+            for text in (
+                placeholder[:split_at],
+                placeholder[split_at:],
+            ):
+                output.extend(
+                    restorer.transform(
+                        SSEEvent(
+                            event="content_block_delta",
+                            data=json.dumps(
+                                {
+                                    "type": "content_block_delta",
+                                    "index": 0,
+                                    "delta": {
+                                        "type": "text_delta",
+                                        "text": text,
+                                    },
+                                }
+                            ),
+                        )
+                    )
+                )
+            output.extend(restorer.finish())
+            restored = "".join(
+                json.loads(event.data)["delta"]["text"]
+                for event in output
+            )
+            latencies_ms.append(
+                (time.perf_counter() - started) * 1000
+            )
+            cases += 1
+            correct += int(restored == original)
     return {
         "cases": cases,
         "accuracy": correct / cases if cases else 1.0,
@@ -150,6 +213,20 @@ def main() -> int:
         "Streaming transform P95: "
         f"{streaming['p95_ms']:.4f}ms"
     )
+    anthropic = evaluate_anthropic_streaming_restoration()
+    print(f"Anthropic streaming cases: {anthropic['cases']}")
+    print(
+        "Anthropic restore accuracy: "
+        f"{anthropic['accuracy']:.4f}"
+    )
+    print(
+        "Anthropic raw secret leakage count: "
+        f"{anthropic['leakage_count']}"
+    )
+    print(
+        "Anthropic transform P95: "
+        f"{anthropic['p95_ms']:.4f}ms"
+    )
     meets_quality = min(precision, recall, f1) >= 0.95
     meets_latency = (
         transform_p95 < 20.0
@@ -159,7 +236,21 @@ def main() -> int:
         streaming["accuracy"] == 1.0
         and streaming["leakage_count"] == 0
     )
-    return 0 if meets_quality and meets_latency and meets_streaming else 1
+    meets_anthropic = (
+        anthropic["accuracy"] == 1.0
+        and anthropic["leakage_count"] == 0
+        and float(anthropic["p95_ms"]) < 20.0
+    )
+    return (
+        0
+        if (
+            meets_quality
+            and meets_latency
+            and meets_streaming
+            and meets_anthropic
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":
