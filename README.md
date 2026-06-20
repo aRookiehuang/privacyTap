@@ -189,6 +189,40 @@ Claude Code会话标识 Header，但这些 Header 不会写入安全归档。
 Anthropic 上游只看到占位符，Claude Code收到恢复后的 `text_delta` 和
 `input_json_delta.partial_json`，因此本地工具仍使用真实值。
 
+## 一键启动真实 Claude Code
+
+首次使用时，双击项目根目录的：
+
+```text
+start-privacytap-claude.cmd
+```
+
+脚本会自动创建 `privacytap.claude.env`。打开该文件，只填写四项：
+
+```env
+PRIVACYTAP_UPSTREAM_BASE_URL=https://你的中转站地址
+ANTHROPIC_API_KEY=你的APIKey
+CLAUDE_MODEL=中转站支持的模型名
+PRIVACYTAP_OUTPUT_DIR=.\privacytap-traces-real
+```
+
+保存后再次双击 `start-privacytap-claude.cmd`，脚本会自动：
+
+1. 启动 PrivacyTap；
+2. 等待 `127.0.0.1:8080` 可用；
+3. 设置 Claude Code代理环境；
+4. 忽略用户级 Claude 配置对 Base URL 的覆盖；
+5. 使用配置的模型启动 Claude Code；
+6. Claude 退出后关闭本次代理，并显示最新审计文件路径。
+
+也可以在 PowerShell 中运行：
+
+```powershell
+.\start-privacytap-claude.cmd
+```
+
+`privacytap.claude.env` 已被 Git 忽略，脚本不会在终端显示 API Key。
+
 ## 无 Key 离线 Claude Code协议演示
 
 ### Terminal 1：Mock Anthropic

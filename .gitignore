@@ -32,6 +32,8 @@ coverage.xml
 *.cover
 nosetests.xml
 .hypothesis/
+*.log
+privacytap-traces*/
 
 # Type checking
 .mypy_cache/
@@ -47,6 +49,7 @@ site/
 .env
 .env.local
 .env.*.local
+privacytap.claude.env
 *.pem
 *.key
 
