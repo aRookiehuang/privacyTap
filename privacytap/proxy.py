@@ -599,6 +599,8 @@ class PrivacyProxyServer:
         tokens = int(
             usage.get("input_tokens") or 0
         ) + int(usage.get("output_tokens") or 0)
+        if provider == "anthropic-count-tokens":
+            tokens = int(response_object.get("input_tokens") or 0)
         return {
             "timestamp": datetime.now().isoformat(),
             "provider": provider,
