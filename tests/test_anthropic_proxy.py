@@ -295,6 +295,193 @@ async def test_anthropic_invalid_request_json_returns_400():
 
 
 @pytest.mark.asyncio
+async def test_anthropic_non_object_request_returns_400():
+    proxy = PrivacyProxyServer(
+        port=0, upstream_base_url="http://127.0.0.1:9"
+    )
+    await proxy.start()
+    try:
+        async with ClientSession() as session:
+            response = await session.post(
+                f"http://127.0.0.1:{proxy.bound_port}/v1/messages",
+                json=[],
+            )
+            body = await response.json()
+        assert response.status == 400
+        assert body["error"]["code"] == "invalid_json"
+    finally:
+        await proxy.stop()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_invalid_upstream_json_returns_502(
+    unused_tcp_port,
+):
+    async def handler(request):
+        return web.Response(
+            body=b"{",
+            headers={"Content-Type": "application/json"},
+        )
+
+    runner = await start_anthropic_upstream(
+        unused_tcp_port, handler
+    )
+    proxy = PrivacyProxyServer(
+        port=0,
+        upstream_base_url=f"http://127.0.0.1:{unused_tcp_port}",
+    )
+    await proxy.start()
+    try:
+        async with ClientSession() as session:
+            response = await session.post(
+                f"http://127.0.0.1:{proxy.bound_port}/v1/messages",
+                json={
+                    "model": "claude-sonnet-4-5",
+                    "max_tokens": 8,
+                    "messages": [],
+                },
+            )
+            body = await response.json()
+        assert response.status == 502
+        assert body["error"]["code"] == "invalid_upstream_json"
+    finally:
+        await proxy.stop()
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_non_json_upstream_body_is_preserved(
+    unused_tcp_port,
+):
+    async def handler(request):
+        return web.Response(status=429, text="limited")
+
+    runner = await start_anthropic_upstream(
+        unused_tcp_port, handler
+    )
+    proxy = PrivacyProxyServer(
+        port=0,
+        upstream_base_url=f"http://127.0.0.1:{unused_tcp_port}",
+    )
+    await proxy.start()
+    try:
+        async with ClientSession() as session:
+            response = await session.post(
+                f"http://127.0.0.1:{proxy.bound_port}/v1/messages",
+                json={
+                    "model": "claude-sonnet-4-5",
+                    "max_tokens": 8,
+                    "messages": [],
+                },
+            )
+            body = await response.text()
+        assert response.status == 429
+        assert body == "limited"
+    finally:
+        await proxy.stop()
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_invalid_sse_is_not_forwarded(
+    unused_tcp_port,
+):
+    async def handler(request):
+        response = web.StreamResponse(
+            headers={"Content-Type": "text/event-stream"}
+        )
+        await response.prepare(request)
+        await response.write(
+            b"event: content_block_delta\ndata: not-json\n\n"
+        )
+        await response.write_eof()
+        return response
+
+    runner = await start_anthropic_upstream(
+        unused_tcp_port, handler
+    )
+    events = []
+    proxy = PrivacyProxyServer(
+        port=0,
+        upstream_base_url=f"http://127.0.0.1:{unused_tcp_port}",
+        on_safe_event=events.append,
+    )
+    await proxy.start()
+    try:
+        async with ClientSession() as session:
+            response = await session.post(
+                f"http://127.0.0.1:{proxy.bound_port}/v1/messages",
+                json={
+                    "model": "claude-sonnet-4-5",
+                    "max_tokens": 8,
+                    "stream": True,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "电话 13800138000",
+                        }
+                    ],
+                },
+            )
+            raw = await response.read()
+        assert response.status == 200
+        assert b"not-json" not in raw
+        assert "13800138000" not in json.dumps(
+            events, ensure_ascii=False
+        )
+    finally:
+        await proxy.stop()
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_exporter_failure_does_not_break_response(
+    unused_tcp_port,
+):
+    async def handler(request):
+        return web.json_response(
+            {
+                "id": "msg_demo",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-sonnet-4-5",
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+        )
+
+    def failing_exporter(event):
+        raise RuntimeError("archive unavailable")
+
+    runner = await start_anthropic_upstream(
+        unused_tcp_port, handler
+    )
+    proxy = PrivacyProxyServer(
+        port=0,
+        upstream_base_url=f"http://127.0.0.1:{unused_tcp_port}",
+        on_safe_event=failing_exporter,
+    )
+    await proxy.start()
+    try:
+        async with ClientSession() as session:
+            response = await session.post(
+                f"http://127.0.0.1:{proxy.bound_port}/v1/messages",
+                json={
+                    "model": "claude-sonnet-4-5",
+                    "max_tokens": 8,
+                    "messages": [],
+                },
+            )
+            body = await response.json()
+        assert response.status == 200
+        assert body["content"][0]["text"] == "ok"
+    finally:
+        await proxy.stop()
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_messages_sse_restores_text_and_tool_arguments(
     unused_tcp_port,
 ):
